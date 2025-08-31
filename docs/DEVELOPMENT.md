@@ -85,25 +85,28 @@ The project uses strict TypeScript settings in `tsconfig.json`:
 
 ### High-Level Overview
 
-```
-┌─────────────────┐    HTTP     ┌─────────────────┐    HTTP     ┌─────────────────┐
-│   Client App    │ ──────────▶ │  LLM-Sentinel   │ ──────────▶ │   AI Provider   │
-│  (OpenAI SDK)   │             │   Proxy Server  │             │   (OpenAI API)  │
-└─────────────────┘ ◀────────── └─────────────────┘ ◀────────── └─────────────────┘
-                        JSON                HTTP                        JSON
-                                            │
-                                            ▼
-                                    ┌─────────────────┐
-                                    │  PII Detection  │
-                                    │   & Masking     │
-                                    └─────────────────┘
+```mermaid
+graph TB
+    A[Client App<br/>OpenAI SDK] -->|HTTP/JSON Request| B[LLM-Sentinel<br/>Proxy Server]
+    B -->|HTTP Request| C[AI Provider<br/>OpenAI API]
+    C -->|JSON Response| B
+    B -->|JSON Response| A
+    
+    B --> D[Sensitive Data<br/>Detection & Masking]
+    D --> E[52 Specialized<br/>Detectors]
+    
+    style A fill:#e3f2fd
+    style B fill:#e8f5e8
+    style C fill:#fff3e0
+    style D fill:#f3e5f5
+    style E fill:#fce4ec
 ```
 
 ### Core Flow
 
 1. **Request Interception**: Express server receives API requests
 2. **Content Extraction**: Parse request body and extract text content
-3. **Sensitive Data Detection**: Run 41 detection rules against content
+3. **Sensitive Data Detection**: Run 52 detection rules against content
 4. **Data Masking**: Replace sensitive data with safe placeholders
 5. **Request Forwarding**: Proxy modified request to target AI service
 6. **Response Handling**: Forward response back to client
@@ -116,7 +119,7 @@ llm-sentinel/
 ├── src/
 │   ├── cli.ts              # Command line interface entry point
 │   ├── proxy-server.ts     # HTTP proxy server implementation
-│   ├── pii-masker.ts       # Detection rules and masking logic
+│   ├── detectors.ts        # Detection rules and masking logic
 │   ├── config.ts           # Configuration management
 │   ├── logger.ts           # Structured logging system
 │   ├── commands.ts         # CLI command implementations
@@ -163,33 +166,27 @@ app.use('/openai', createProxyMiddleware({
 - Error handling and logging
 - Health check endpoint
 
-### 2. PII Masker (`pii-masker.ts`)
+### 2. Sensitive Data Detector (`detectors.ts`)
 
-The detection engine with 41 specialized rules:
+The detection engine with 52 specialized rules:
 
 ```typescript
-interface DetectionRule {
+interface MaskingRule {
   name: string;           // Rule identifier
   pattern: RegExp;        // Detection regex pattern
-  replacement: string;    // Replacement placeholder
-  category: string;       // Rule category (api-keys, personal, etc.)
-  enabled: boolean;       // Enable/disable flag
+  replacement: string | ((match: string, ...groups: string[]) => string);  // Replacement placeholder or function
 }
 
-const detectionRules: DetectionRule[] = [
-  {
-    name: 'openaiApiKey',
-    pattern: /sk-[a-zA-Z0-9]{48}/g,
-    replacement: '[OPENAI_API_KEY_MASKED]',
-    category: 'api-keys',
-    enabled: true
-  },
-  // ... 40 more rules
-];
-
-export function maskSensitiveData(content: string): MaskingResult {
-  // Apply all enabled rules
-  // Return masked content + detection metadata
+class SensitiveDataDetector {
+  private rules: MaskingRule[];
+  
+  constructor() {
+    this.rules = this.getDefaultRules();
+  }
+  
+  public mask(text: string): [string, Array<{entityType: string, masked: string, count: number}>] {
+    // Apply all rules and return masked content + detection metadata
+  }
 }
 ```
 
@@ -205,20 +202,41 @@ export function maskSensitiveData(content: string): MaskingResult {
 Manages application configuration with defaults and validation:
 
 ```typescript
-interface Config {
+interface LLMSentinelConfig {
   server: {
     port: number;
+    openaiTarget: string;
+    ollamaTarget: string;
   };
   detection: {
     enabled: boolean;
     enabledRules: string[];
+    customRules: Array<{
+      name: string;
+      pattern: string;
+      replacement: string;
+      enabled: boolean;
+    }>;
   };
   logging: {
     showDetectedEntity: boolean;
+    showMaskedValue: boolean;
+    showOccurrenceCount: boolean;
+    logToConsole: boolean;
+    logToFile: boolean;
     logLevel: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
+    truncatePayload: boolean;
+    maxPayloadLogLength: number;
   };
   notifications: {
     enabled: boolean;
+    showEntityType: boolean;
+    showCount: boolean;
+    sound: boolean;
+  };
+  security: {
+    redactApiKeys: boolean;
+    redactCustomHeaders: string[];
   };
 }
 
@@ -264,15 +282,13 @@ program
 
 ### Step 1: Define the Detection Rule
 
-Add to `pii-masker.ts`:
+Add to `detectors.ts`:
 
 ```typescript
-const newServiceApiKey: DetectionRule = {
+const newServiceApiKey: MaskingRule = {
   name: 'newServiceApiKey',
   pattern: /ns_[a-zA-Z0-9]{32}/g,  // Service-specific pattern
-  replacement: '[NEW_SERVICE_API_KEY_MASKED]',
-  category: 'api-keys',
-  enabled: true
+  replacement: '[NEW_SERVICE_API_KEY_MASKED]'
 };
 ```
 
@@ -302,12 +318,14 @@ const newServiceApiKey: DetectionRule = {
 ### Step 3: Add to Rules Array
 
 ```typescript
-// In pii-masker.ts
-const detectionRules: DetectionRule[] = [
-  // ... existing rules
-  newServiceApiKey,
-  // Keep alphabetically sorted for maintainability
-];
+// In detectors.ts - add to the rules array in getDefaultRules() method
+private getDefaultRules(): MaskingRule[] {
+  return [
+    // ... existing rules
+    newServiceApiKey,
+    // Keep alphabetically sorted for maintainability
+  ];
+}
 ```
 
 ### Step 4: Update Default Configuration
@@ -327,25 +345,29 @@ const defaultEnabledRules = [
 describe('New Service API Key Detection', () => {
   test('should detect and mask new service API keys', () => {
     const input = 'My API key is ns_abcd1234567890abcdef1234567890ab';
-    const result = maskSensitiveData(input);
+    const detector = new SensitiveDataDetector();
+    const [maskedText, findings] = detector.mask(input);
     
-    expect(result.maskedContent).toBe('My API key is [NEW_SERVICE_API_KEY_MASKED]');
-    expect(result.detections).toHaveLength(1);
-    expect(result.detections[0].entityType).toBe('newServiceApiKey');
+    expect(maskedText).toBe('My API key is [NEW_SERVICE_API_KEY_MASKED]');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].entityType).toBe('newServiceApiKey');
   });
 
   test('should handle multiple keys', () => {
     const input = 'Keys: ns_key1111111111111111111111111111 and ns_key2222222222222222222222222222';
-    const result = maskSensitiveData(input);
+    const detector = new SensitiveDataDetector();
+    const [maskedText, findings] = detector.mask(input);
     
-    expect(result.detections).toHaveLength(2);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].count).toBe(2);
   });
 
   test('should not match invalid patterns', () => {
     const input = 'Not a key: ns_short or random_ns_middle_text';
-    const result = maskSensitiveData(input);
+    const detector = new SensitiveDataDetector();
+    const [maskedText, findings] = detector.mask(input);
     
-    expect(result.detections).toHaveLength(0);
+    expect(findings).toHaveLength(0);
   });
 });
 ```

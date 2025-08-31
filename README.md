@@ -77,6 +77,8 @@ const response = await openai.chat.completions.create({
 // LLM receives: "My AWS key is [AWS_ACCESS_KEY_MASKED] and email [EMAIL_MASKED]"
 ```
 
+**Streaming Support:** All streaming requests are automatically supported - just add `stream: true` to your requests and LLM-Sentinel will mask sensitive data in real-time.
+
 ### Ollama SDK
 
 ```python
@@ -93,6 +95,8 @@ response = client.chat(
 )
 # LLM receives: "My credit card is [CREDIT_CARD_MASKED]"
 ```
+
+**Streaming Support:** Ollama streaming requests work seamlessly - use `stream=True` in your client calls and all sensitive data will be masked in real-time.
 
 ### cURL Examples
 
@@ -117,7 +121,7 @@ curl -X POST http://localhost:5050/ollama/api/generate \
   }'
 ```
 
-## What Gets Protected (41 Detectors)
+## What Gets Protected (52 Detectors)
 
 - **🤖 AI/ML Services**: OpenAI, Claude, Google AI, Azure OpenAI, Cohere, HuggingFace
 - **☁️ Cloud**: AWS keys, Azure subscriptions, GCP credentials, Heroku, Cloudflare
@@ -202,7 +206,7 @@ http://localhost:5050
   - Processing logs and timing
   - Provider identification (OpenAI, Ollama, Claude, etc.)
 - **OLED dark mode** - Battery-friendly pure black interface
-- **Interactive controls** - View all 41 detectors, toggle settings
+- **Interactive controls** - View all 52 detectors, toggle settings
 - **Complete configuration** - See all settings with CLI examples
 - **Horizontal scrolling** - All JSON/logs properly readable
 
@@ -233,23 +237,29 @@ curl http://localhost:5050/health
 
 ## How It Works
 
-```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│   Your App  │───▶│ LLM-Sentinel │───▶│   AI Model  │
-└─────────────┘    └──────────────┘    └─────────────┘
-                           │
-                           ▼
-                   ┌──────────────────┐
-                   │ 41 Detectors     │
-                   │ • API Keys       │
-                   │ • Credentials    │  
-                   │ • Personal Data  │
-                   │ • Private Keys   │
-                   └──────────────────┘
+```mermaid
+graph LR
+    A[Your App] -->|HTTP Request| B[LLM-Sentinel]
+    B -->|Clean Request| C[AI Model]
+    C -->|Response| B
+    B -->|Response| A
+    
+    B --> D[52 Detectors]
+    D --> E[API Keys]
+    D --> F[Credentials] 
+    D --> G[Personal Data]
+    D --> H[Private Keys]
+    
+    style B fill:#e1f5fe
+    style D fill:#f3e5f5
+    style E fill:#fff3e0
+    style F fill:#fff3e0
+    style G fill:#fff3e0
+    style H fill:#fff3e0
 ```
 
 1. **Intercepts** requests to AI APIs
-2. **Scans** content with 41 specialized detectors  
+2. **Scans** content with 52 specialized detectors  
 3. **Masks** sensitive data with safe placeholders
 4. **Forwards** clean requests to AI models
 5. **Logs** detections (secure by default)
@@ -263,22 +273,37 @@ LLM-Sentinel works out-of-the-box with secure defaults. Configuration is optiona
 **Sample configuration:**
 ```json
 {
-  "server": { "port": 5050 },
+  "server": { 
+    "port": 5050,
+    "openaiTarget": "https://api.openai.com",
+    "ollamaTarget": "http://localhost:11434"
+  },
   "detection": { 
     "enabled": true,
-    "enabledRules": ["email", "openaiApiKey", "awsAccessKey"]
+    "enabledRules": ["email", "openaiApiKey", "awsAccessKey"],
+    "customRules": []
   },
   "logging": {
     "showDetectedEntity": false,
-    "logLevel": "INFO"
+    "logLevel": "INFO",
+    "logToConsole": true,
+    "logToFile": true
   },
-  "notifications": { "enabled": true }
+  "notifications": { 
+    "enabled": true,
+    "sound": false
+  },
+  "security": {
+    "redactApiKeys": true,
+    "redactCustomHeaders": ["x-api-key"]
+  }
 }
 ```
 
 ## Security Features
 
-- ✅ **41 specialized detectors** for comprehensive coverage
+- ✅ **52 specialized detectors** for comprehensive coverage
+- ✅ **Streaming support** - works with real-time streaming requests
 - ✅ **Privacy-first logging** - sensitive data never stored
 - ✅ **Zero data retention** - proxy only, no storage
 - ✅ **Configurable detection** - enable/disable specific types
@@ -300,4 +325,4 @@ See [LICENSE](LICENSE) for full terms.
 
 ---
 
-**🛡️ Protect your sensitive data. Enable all 41 detectors by default.**
+**🛡️ Protect your sensitive data. Enable all 52 detectors by default.**

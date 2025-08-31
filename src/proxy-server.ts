@@ -3,6 +3,7 @@ import { createProxyMiddleware, Options, fixRequestBody } from 'http-proxy-middl
 import notifier from 'node-notifier';
 import * as http from 'http';
 import * as path from 'path';
+import * as fs from 'fs';
 const WebSocket = require('ws');
 const { Server: WebSocketServer } = require('ws');
 import { SensitiveDataDetector } from './detectors';
@@ -366,7 +367,20 @@ export class ProxyServer {
     });
 
     // Dashboard static files - serve the built Next.js dashboard at root
-    const dashboardPath = path.join(__dirname, 'dashboard');
+    // Try multiple possible paths for dashboard files
+    let dashboardPath = path.join(__dirname, 'dashboard');
+    
+    // Check if dashboard exists at the default path, if not try alternate paths
+    if (!fs.existsSync(dashboardPath)) {
+      // Try relative to the package root
+      const packageRoot = path.dirname(__dirname);
+      dashboardPath = path.join(packageRoot, 'dashboard');
+      
+      if (!fs.existsSync(dashboardPath)) {
+        // Try in the same directory as the executable
+        dashboardPath = path.join(__dirname, '..', 'dashboard');
+      }
+    }
     
     // Serve dashboard at root
     this.app.get('/', (_req, res) => {

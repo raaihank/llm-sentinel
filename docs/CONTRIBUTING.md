@@ -130,7 +130,7 @@ const rule: any = {
 src/
 ├── cli.ts              # Command line interface
 ├── proxy-server.ts     # HTTP proxy server
-├── pii-masker.ts       # Detection rules engine
+├── detectors.ts        # Detection rules engine
 ├── config.ts           # Configuration management
 ├── logger.ts           # Structured logging
 ├── commands.ts         # CLI command implementations
@@ -294,13 +294,11 @@ When adding detection rules for new services:
 
 Example:
 ```typescript
-// In pii-masker.ts
-const newServiceApiKey: DetectionRule = {
+// In detectors.ts
+const newServiceApiKey: MaskingRule = {
   name: 'newServiceApiKey',
   pattern: /ns_[a-zA-Z0-9]{32}/g,
-  replacement: '[NEW_SERVICE_API_KEY_MASKED]',
-  category: 'api-keys',
-  enabled: true
+  replacement: '[NEW_SERVICE_API_KEY_MASKED]'
 };
 ```
 
