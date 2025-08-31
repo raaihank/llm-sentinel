@@ -1,0 +1,64 @@
+{
+  "server": {
+    "port": 5050
+  },
+  "detection": {
+    "enabled": true,
+    "enabledRules": [
+      "email",
+      "openaiApiKey",
+      "anthropicApiKey",
+      "awsAccessKey",
+      "awsSecretKey",
+      "googleApiKey",
+      "azureApiKey",
+      "pineconeApiKey",
+      "cohereApiKey",
+      "huggingFaceToken",
+      "privateKey",
+      "jwtToken",
+      "creditCard",
+      "ssn",
+      "phoneNumber",
+      "ipAddress",
+      "userPath",
+      "postgresqlUrl",
+      "mongodbUrl",
+      "mysqlUrl",
+      "redisUrl",
+      "elasticsearchUrl",
+      "twilioApiKey",
+      "slackToken",
+      "discordToken",
+      "sendgridApiKey",
+      "mailgunApiKey",
+      "stripeApiKey",
+      "herokuApiKey",
+      "cloudflareApiKey",
+      "firebaseApiKey",
+      "npmToken",
+      "pypiToken",
+      "dockerToken",
+      "githubToken",
+      "kubernetesToken",
+      "webhookUrl",
+      "weaviateApiKey",
+      "chromaApiKey",
+      "dockerRegistryAuth",
+      "azureSubscriptionId",
+      "gcpProjectNumber"
+    ]
+  },
+  "logging": {
+    "showDetectedEntity": false,
+    "showMaskedValue": true,
+    "logLevel": "INFO"
+  },
+  "notifications": {
+    "enabled": true
+  },
+  "targets": {
+    "openai": "https://api.openai.com",
+    "ollama": "http://localhost:11434"
+  }
+}

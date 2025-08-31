@@ -1,0 +1,45 @@
+# Source files (dist is what users need)
+src/
+dashboard/src/
+dashboard/.next/
+dashboard/node_modules/
+
+# Development files
+.github/
+.vscode/
+.idea/
+*.log
+*.pid
+.env*
+.DS_Store
+
+# Test files
+test-*.js
+*.test.ts
+*.spec.ts
+
+# Build artifacts that shouldn't be in npm
+.turbo/
+.cache/
+
+# Docker files (users will pull from Docker Hub)
+Dockerfile
+.dockerignore
+docker/
+
+# Development configs that users don't need
+.eslintrc*
+.prettierrc*
+nodemon.json
+
+# Local files
+.local/
+.pm2/
+.sentinel/
+.claude/
+.cursor/
+logs/*.log
+
+# Git files
+.git/
+.gitignore
