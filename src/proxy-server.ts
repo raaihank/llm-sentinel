@@ -385,8 +385,11 @@ export class ProxyServer {
     // Serve dashboard at root
     this.app.get('/', (_req, res) => {
       const indexPath = path.join(dashboardPath, 'index.html');
+
       if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
+        // Use absolute path for Express sendFile
+        const absolutePath = path.resolve(indexPath);
+        res.sendFile(absolutePath);
       } else {
         // Dashboard not built - serve development message
         res.send(`
