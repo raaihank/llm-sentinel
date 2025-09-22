@@ -1,0 +1,127 @@
+name: CI - Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Node ${{ matrix.node }} - Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+
+    env:
+      CI: true
+      FORCE_COLOR: 1
+      NODE_ENV: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          check-latest: true
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "Installing server dependencies with npm ci..."
+            npm ci
+          else
+            echo "No lockfile found; running npm install"
+            npm install
+          fi
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build (server + dashboard)
+        run: npm run build
+
+      - name: Verify build artifacts
+        run: |
+          echo "Checking server build..."
+          test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
+          test -f dist/proxy-server.js || (echo "Missing dist/proxy-server.js" && exit 1)
+
+          echo "Checking dashboard build..."
+          test -f dist/dashboard/index.html || (echo "Missing dist/dashboard/index.html" && exit 1)
+
+          echo "Build verification complete ✅"
+
+      - name: Test production server start
+        run: |
+          echo "Testing production server startup..."
+          timeout 10s node dist/cli.js start -p 5050 &
+          SERVER_PID=$!
+          sleep 5
+
+          # Test health endpoint
+          curl -f http://localhost:5050/health || (echo "Health check failed" && exit 1)
+
+          # Test dashboard
+          curl -f http://localhost:5050 | grep -q "LLM-Sentinel" || (echo "Dashboard not loading" && exit 1)
+
+          kill $SERVER_PID || true
+          echo "Production server test passed ✅"
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-node-${{ matrix.node }}
+          path: dist
+          if-no-files-found: error
+
+  docker:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          echo "Building Docker image..."
+          docker build -t llm-sentinel:test .
+
+      - name: Test Docker container
+        run: |
+          echo "Starting Docker container..."
+          docker run -d -p 5050:5050 --name test-container llm-sentinel:test
+
+          # Wait for container to start
+          sleep 10
+
+          # Test health endpoint
+          curl -f http://localhost:5050/health || (echo "Docker health check failed" && exit 1)
+
+          # Test dashboard
+          curl -f http://localhost:5050 | grep -q "LLM-Sentinel" || (echo "Docker dashboard not loading" && exit 1)
+
+          # Check logs
+          docker logs test-container
+
+          # Cleanup
+          docker stop test-container
+          docker rm test-container
+
+          echo "Docker test passed ✅"

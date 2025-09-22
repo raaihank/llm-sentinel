@@ -1,3 +1,8 @@
+<!-- Badges -->
+[![Build](https://github.com/raaihank/llm-sentinel/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/raaihank/llm-sentinel/actions/workflows/build.yml)
+[![Test](https://github.com/raaihank/llm-sentinel/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/raaihank/llm-sentinel/actions/workflows/test.yml)
+[![Security](https://github.com/raaihank/llm-sentinel/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/raaihank/llm-sentinel/actions/workflows/security.yml)
+
 # LLM-Sentinel
 
 > **Privacy-first proxy that automatically detects and masks sensitive data before it reaches AI models without compromising latency.**

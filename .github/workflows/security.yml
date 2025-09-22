@@ -1,0 +1,134 @@
+name: CI - Security
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL Analyze (JS/TS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: +security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze to SARIF directory (no upload)
+        uses: github/codeql-action/analyze@v3
+        with:
+          output: ${{ github.workspace }}/codeql-results
+          upload: false   # <- prevents Code Scanning upload
+
+      - name: Upload CodeQL SARIF
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: ${{ github.workspace }}/codeql-results/**/*.sarif
+          if-no-files-found: error
+          retention-days: 7
+
+  dependency-audit:
+    name: npm audit - Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci
+
+      - name: Install dashboard dependencies
+        run: cd dashboard && npm ci
+
+      - name: npm audit server (high+)
+        run: npm audit --audit-level=high || true
+
+      - name: npm audit dashboard (high+)
+        run: cd dashboard && npm audit --audit-level=high || true
+
+      - name: Save audit reports
+        run: |
+          npm audit --json > npm-audit-server-${{ matrix.node-version }}.json || true
+          cd dashboard && npm audit --json > ../npm-audit-dashboard-${{ matrix.node-version }}.json || true
+
+      - name: Upload audit reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ matrix.node-version }}
+          path: |
+            npm-audit-server-${{ matrix.node-version }}.json
+            npm-audit-dashboard-${{ matrix.node-version }}.json
+          retention-days: 7
+
+  secrets-scan:
+    name: Gitleaks scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Run in Docker; write SARIF into the checked-out repo dir
+      - name: Run Gitleaks (Docker) → SARIF
+        run: |
+          docker run --rm \
+            -v "$PWD":/repo \
+            -w /repo \
+            -e GITLEAKS_LICENSE="${{ secrets.GITLEAKS_LICENSE }}" \
+            zricethezav/gitleaks:latest \
+            detect \
+              --source . \
+              --report-format sarif \
+              --report-path /repo/gitleaks.sarif \
+              --no-banner
+        shell: bash
+        continue-on-error: true
+
+      - name: Upload Gitleaks SARIF
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: ${{ github.workspace }}/gitleaks.sarif
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,120 @@
+name: CI - Tests Suite
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} - tests suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+
+    env:
+      CI: true
+      NODE_ENV: test
+      FORCE_COLOR: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          check-latest: true
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "Installing dependencies with npm ci..."
+            npm ci
+          else
+            echo "No lockfile found; running npm install"
+            npm install
+          fi
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build project
+        run: npm run build
+
+      - name: Run tests (if available)
+        run: |
+          if npm run test --silent 2>/dev/null; then
+            echo "Running test suite..."
+            npm test
+          else
+            echo "No test script found, running manual verification..."
+
+            # Test CLI functionality
+            node dist/cli.js --help
+            node dist/cli.js --version
+
+            # Test detection manually
+            echo "Testing detection engine..."
+            node -e "
+              const { maskSensitiveData } = require('./dist/detectors');
+              const testInput = 'My API key is sk-test123456789 and email is test@example.com';
+              const result = maskSensitiveData(testInput);
+              console.log('Input:', testInput);
+              console.log('Output:', result);
+              if (result.includes('sk-test123456789')) {
+                console.error('❌ API key not masked!');
+                process.exit(1);
+              }
+              if (result.includes('test@example.com')) {
+                console.error('❌ Email not masked!');
+                process.exit(1);
+              }
+              console.log('✅ Detection working correctly');
+            " || exit 1
+          fi
+
+      - name: Integration test - Server functionality
+        run: |
+          echo "Testing server startup and endpoints..."
+
+          # Start server in background
+          node dist/cli.js start -p 5050 &
+          SERVER_PID=$!
+
+          # Wait for server to start
+          sleep 10
+
+          # Test health endpoint
+          curl -f http://localhost:5050/health || (echo "❌ Health check failed" && kill $SERVER_PID && exit 1)
+
+          # Test config endpoint
+          curl -f http://localhost:5050/api/config || (echo "❌ Config endpoint failed" && kill $SERVER_PID && exit 1)
+
+          # Test dashboard loads
+          curl -s http://localhost:5050 | grep -q "LLM-Sentinel" || (echo "❌ Dashboard not loading" && kill $SERVER_PID && exit 1)
+
+          # Cleanup
+          kill $SERVER_PID || true
+          echo "✅ Integration tests passed"
+
+      - name: Test dashboard build
+        run: |
+          echo "Testing dashboard can be built separately..."
+          cd dashboard
+          npm ci
+          npm run build
+          test -f .next/static || test -f out/index.html || (echo "❌ Dashboard build failed" && exit 1)
+          echo "✅ Dashboard build test passed"
