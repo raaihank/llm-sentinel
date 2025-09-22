@@ -55,6 +55,7 @@
     "commander": "^14.0.0",
     "express": "^5.1.0",
     "http-proxy-middleware": "^3.0.5",
+    "llm-sentinel": "^1.0.4",
     "node-notifier": "^10.0.1",
     "pm2": "^6.0.8",
     "ws": "^8.18.0"
