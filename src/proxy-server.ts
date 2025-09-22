@@ -384,7 +384,49 @@ export class ProxyServer {
     
     // Serve dashboard at root
     this.app.get('/', (_req, res) => {
-      res.sendFile(path.join(dashboardPath, 'index.html'));
+      const indexPath = path.join(dashboardPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        // Dashboard not built - serve development message
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>LLM-Sentinel</title>
+              <style>
+                body { font-family: system-ui; margin: 40px; background: #000; color: #fff; }
+                .container { max-width: 600px; margin: 0 auto; text-align: center; }
+                .status { color: #10b981; margin: 20px 0; }
+                .endpoints { text-align: left; background: #111; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .endpoint { margin: 10px 0; font-family: monospace; }
+                .note { color: #94a3b8; font-size: 14px; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>🛡️ LLM-Sentinel</h1>
+                <div class="status">✅ Server Running</div>
+                <p>Privacy-first proxy for AI APIs</p>
+
+                <div class="endpoints">
+                  <h3>Available Endpoints:</h3>
+                  <div class="endpoint">📊 <strong>/health</strong> - Health check</div>
+                  <div class="endpoint">📈 <strong>/api/stats</strong> - Statistics</div>
+                  <div class="endpoint">🔧 <strong>/api/config</strong> - Configuration</div>
+                  <div class="endpoint">🤖 <strong>/openai/*</strong> - OpenAI proxy</div>
+                  <div class="endpoint">🦙 <strong>/ollama/*</strong> - Ollama proxy</div>
+                </div>
+
+                <div class="note">
+                  <p><strong>Dashboard:</strong> Run <code>npm run build</code> to build the full dashboard interface.</p>
+                  <p><strong>Development:</strong> Use <code>npm run dev:dashboard</code> for dashboard development.</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `);
+      }
     });
     
     // Serve static dashboard assets

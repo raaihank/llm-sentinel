@@ -192,8 +192,15 @@ docker restart llm-sentinel                # Restart
 
 ## Real-Time Dashboard 🔥
 
-Access the beautiful monitoring dashboard at:
+The dashboard provides beautiful monitoring and control interface:
+
+### 📊 Dashboard Access
+When using the npm package, the dashboard is automatically served at the same port as the proxy:
 ```bash
+npm install -g llm-sentinel
+llmsentinel start
+
+# Dashboard automatically available at:
 http://localhost:5050
 ```
 
@@ -202,7 +209,7 @@ http://localhost:5050
 - **Detailed event inspection** - Click on any event to see:
   - Complete request/response data
   - Headers (with API keys redacted)
-  - Original vs masked content comparison 
+  - Original vs masked content comparison
   - Processing logs and timing
   - Provider identification (OpenAI, Ollama, Claude, etc.)
 - **OLED dark mode** - Battery-friendly pure black interface
@@ -222,7 +229,7 @@ http://localhost:5050
 # Run with dashboard
 docker run -p 5050:5050 raaihank/llm-sentinel:latest
 
-# Then open browser to:
+# Dashboard available at:
 http://localhost:5050
 ```
 
@@ -302,7 +309,7 @@ LLM-Sentinel works out-of-the-box with secure defaults. Configuration is optiona
 
 ## Security Features
 
-- ✅ **52 specialized detectors** for comprehensive coverage
+- ✅ **50+ specialized detectors** for comprehensive coverage
 - ✅ **Streaming support** - works with real-time streaming requests
 - ✅ **Privacy-first logging** - sensitive data never stored
 - ✅ **Zero data retention** - proxy only, no storage
@@ -312,7 +319,7 @@ LLM-Sentinel works out-of-the-box with secure defaults. Configuration is optiona
 
 ## Links
 
-- 📖 **[Development Guide](docs/DEVELOPMENT.md)** - Setup, architecture, adding detectors
+- 📖 **[Development Guide](docs/DEVELOPMENT.md)** - Development setup, architecture, dashboard customization, adding detectors
 - 🤝 **[Contributing](docs/CONTRIBUTING.md)** - How to contribute, code style, testing
 - 🚀 **[Docker Hub](https://hub.docker.com/r/raaihank/llm-sentinel)** - Pre-built images
 - 🐛 **[Issues](https://github.com/raaihank/llm-sentinel/issues)** - Bug reports and feature requests
