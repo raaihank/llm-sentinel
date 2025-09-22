@@ -1,6 +1,6 @@
 {
   "name": "llm-sentinel",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A proxy to detect and mask sensitive information in LLM API requests",
   "main": "dist/cli.js",
   "bin": {
