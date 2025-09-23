@@ -9,14 +9,6 @@
 
 ## Installation
 
-### NPM (Recommended)
-
-```bash
-npm install -g llm-sentinel
-
-llmsentinel help
-```
-
 ### Docker
 
 ```bash
