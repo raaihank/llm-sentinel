@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yourusername/llm-sentinel/internal/config"
-	"github.com/yourusername/llm-sentinel/internal/logger"
+	"github.com/raaihank/llm-sentinel/internal/config"
+	"github.com/raaihank/llm-sentinel/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -168,13 +168,13 @@ func (d *Detector) isSensitiveHeader(header string) bool {
 func (d *Detector) isAuthHeader(header string) bool {
 	headerLower := strings.ToLower(header)
 	authHeaders := []string{"authorization", "x-api-key", "x-auth-token", "bearer"}
-	
+
 	for _, authHeader := range authHeaders {
 		if strings.Contains(headerLower, authHeader) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

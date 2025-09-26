@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourusername/llm-sentinel/internal/config"
-	"github.com/yourusername/llm-sentinel/internal/logger"
-	"github.com/yourusername/llm-sentinel/internal/proxy"
+	"github.com/raaihank/llm-sentinel/internal/config"
+	"github.com/raaihank/llm-sentinel/internal/logger"
+	"github.com/raaihank/llm-sentinel/internal/proxy"
 	"go.uber.org/zap"
 )
 

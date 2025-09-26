@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/llm-sentinel/internal/config"
+	"github.com/raaihank/llm-sentinel/internal/config"
 )
 
 // RateLimiter implements token bucket rate limiting for DoS protection
