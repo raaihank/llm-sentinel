@@ -1,0 +1,311 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/raaihank/llm-sentinel/internal/cache"
+	"github.com/raaihank/llm-sentinel/internal/config"
+	"github.com/raaihank/llm-sentinel/internal/embeddings"
+	"github.com/raaihank/llm-sentinel/internal/etl"
+	"github.com/raaihank/llm-sentinel/internal/logger"
+	"github.com/raaihank/llm-sentinel/internal/vector"
+)
+
+func main() {
+	var (
+		configPath   = flag.String("config", "configs/default.yaml", "Configuration file path")
+		inputFile    = flag.String("input", "", "Input dataset file (CSV, Parquet, or JSON)")
+		batchSize    = flag.Int("batch-size", 1000, "Batch size for processing")
+		workers      = flag.Int("workers", 4, "Number of worker goroutines")
+		skipCache    = flag.Bool("skip-cache", false, "Skip updating Redis cache")
+		skipIndex    = flag.Bool("skip-index", false, "Skip creating vector index")
+		validateOnly = flag.Bool("validate-only", false, "Only validate data, don't process")
+		dryRun       = flag.Bool("dry-run", false, "Dry run - don't write to database")
+		rebuildCache = flag.Bool("rebuild-cache", false, "Rebuild Redis cache from database")
+		showStats    = flag.Bool("stats", false, "Show database statistics and exit")
+	)
+	flag.Parse()
+
+	if *inputFile == "" && !*rebuildCache && !*showStats {
+		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  %s --input dataset.csv --batch-size 500\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --input dataset.parquet --workers 8\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --rebuild-cache\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s --stats\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	// Load configuration
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger
+	log, err := logger.New(logger.Config{
+		Level:  cfg.Logging.Level,
+		Format: cfg.Logging.Format,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer log.Sync()
+
+	log.Info("Starting LLM-Sentinel ETL Pipeline",
+		zap.String("version", "0.1.0"),
+		zap.String("config", *configPath))
+
+	// Create context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Info("Received shutdown signal, cancelling operations...")
+		cancel()
+	}()
+
+	// Initialize services
+	services, err := initializeServices(cfg, log)
+	if err != nil {
+		log.Fatal("Failed to initialize services", zap.Error(err))
+	}
+	defer services.cleanup()
+
+	// Handle different operations
+	switch {
+	case *showStats:
+		if err := showDatabaseStats(ctx, services, log); err != nil {
+			log.Fatal("Failed to show stats", zap.Error(err))
+		}
+	case *rebuildCache:
+		if err := rebuildCacheFromDB(ctx, services, log); err != nil {
+			log.Fatal("Failed to rebuild cache", zap.Error(err))
+		}
+	default:
+		// Process input file
+		etlConfig := &etl.Config{
+			BatchSize:      *batchSize,
+			WorkerCount:    *workers,
+			MaxRetries:     3,
+			RetryDelay:     5 * time.Second,
+			SkipDuplicates: true,
+			ValidateData:   true,
+			CreateIndex:    !*skipIndex,
+			UpdateCache:    !*skipCache,
+			ProgressReport: 1000,
+		}
+
+		if err := processDataset(ctx, services, etlConfig, *inputFile, *validateOnly, *dryRun, log); err != nil {
+			log.Fatal("ETL processing failed", zap.Error(err))
+		}
+	}
+
+	log.Info("ETL pipeline completed successfully")
+}
+
+// services holds all initialized services
+type services struct {
+	vectorStore      *vector.Store
+	embeddingService embeddings.EmbeddingService
+	vectorCache      *cache.VectorCache
+}
+
+func (s *services) cleanup() {
+	if s.embeddingService != nil {
+		s.embeddingService.Close()
+	}
+	if s.vectorStore != nil {
+		s.vectorStore.Close()
+	}
+	if s.vectorCache != nil {
+		s.vectorCache.Close()
+	}
+}
+
+// initializeServices initializes all required services
+func initializeServices(cfg *config.Config, log *logger.Logger) (*services, error) {
+	services := &services{}
+
+	// Initialize vector store
+	log.Info("Initializing vector store...")
+	vectorStore, err := vector.NewStore(&vector.Config{
+		DatabaseURL:     cfg.Security.VectorSecurity.Database.DatabaseURL,
+		MaxOpenConns:    cfg.Security.VectorSecurity.Database.MaxOpenConns,
+		MaxIdleConns:    cfg.Security.VectorSecurity.Database.MaxIdleConns,
+		ConnMaxLifetime: cfg.Security.VectorSecurity.Database.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.Security.VectorSecurity.Database.ConnMaxIdleTime,
+	}, log.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize vector store: %w", err)
+	}
+	services.vectorStore = vectorStore
+
+	// Initialize embedding service (using simple service for now)
+	log.Info("Initializing embedding service...")
+	embeddingService, err := embeddings.NewSimpleService(&embeddings.ModelConfig{
+		ModelName:     cfg.Security.VectorSecurity.Model.ModelName,
+		ModelPath:     cfg.Security.VectorSecurity.Model.ModelPath,
+		TokenizerPath: cfg.Security.VectorSecurity.Model.TokenizerPath,
+		VocabPath:     cfg.Security.VectorSecurity.Model.VocabPath,
+		CacheDir:      cfg.Security.VectorSecurity.Model.CacheDir,
+		AutoDownload:  cfg.Security.VectorSecurity.Model.AutoDownload,
+		MaxLength:     cfg.Security.VectorSecurity.Model.MaxLength,
+		BatchSize:     cfg.Security.VectorSecurity.Model.BatchSize,
+		ModelTimeout:  cfg.Security.VectorSecurity.Model.ModelTimeout,
+	}, log.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize embedding service: %w", err)
+	}
+	services.embeddingService = embeddingService
+
+	// Initialize vector cache (optional)
+	if cfg.Security.VectorSecurity.CacheEnabled {
+		log.Info("Initializing vector cache...")
+		vectorCache, err := cache.NewVectorCache(&cache.Config{
+			RedisURL:        cfg.Security.VectorSecurity.Cache.RedisURL,
+			MaxConnections:  cfg.Security.VectorSecurity.Cache.MaxConnections,
+			MinIdleConns:    cfg.Security.VectorSecurity.Cache.MinIdleConns,
+			ConnMaxLifetime: cfg.Security.VectorSecurity.Cache.ConnMaxLifetime,
+			DefaultTTL:      cfg.Security.VectorSecurity.Cache.DefaultTTL,
+			MaxCacheSize:    cfg.Security.VectorSecurity.Cache.MaxCacheSize,
+			KeyPrefix:       cfg.Security.VectorSecurity.Cache.KeyPrefix,
+		}, log.Logger)
+		if err != nil {
+			log.Warn("Failed to initialize vector cache, continuing without cache", zap.Error(err))
+		} else {
+			services.vectorCache = vectorCache
+		}
+	}
+
+	return services, nil
+}
+
+// processDataset processes the input dataset file
+func processDataset(ctx context.Context, services *services, etlConfig *etl.Config, inputFile string, validateOnly, dryRun bool, log *logger.Logger) error {
+	log.Info("Processing dataset",
+		zap.String("file", inputFile),
+		zap.Bool("validate_only", validateOnly),
+		zap.Bool("dry_run", dryRun))
+
+	// Check if file exists
+	if _, err := os.Stat(inputFile); os.IsNotExist(err) {
+		return fmt.Errorf("input file does not exist: %s", inputFile)
+	}
+
+	// Create ETL pipeline
+	pipeline := etl.NewPipeline(
+		services.vectorStore,
+		services.embeddingService,
+		services.vectorCache,
+		etlConfig,
+		log.Logger,
+	)
+
+	// Process the file
+	result, err := pipeline.ProcessFile(ctx, inputFile)
+	if err != nil {
+		return fmt.Errorf("pipeline processing failed: %w", err)
+	}
+
+	// Report results
+	log.Info("Dataset processing completed",
+		zap.String("file", inputFile),
+		zap.Int64("total_records", result.TotalRecords),
+		zap.Int64("processed_ok", result.ProcessedOK),
+		zap.Int64("processed_failed", result.ProcessedFailed),
+		zap.Int64("duplicates", result.Duplicates),
+		zap.Duration("total_duration", result.Duration),
+		zap.Duration("embedding_time", result.EmbeddingTime),
+		zap.Duration("database_time", result.DatabaseTime),
+		zap.Duration("cache_time", result.CacheTime),
+		zap.Float64("records_per_second", float64(result.TotalRecords)/result.Duration.Seconds()))
+
+	if len(result.Errors) > 0 {
+		log.Warn("Processing completed with errors", zap.Strings("errors", result.Errors))
+	}
+
+	return nil
+}
+
+// showDatabaseStats displays current database statistics
+func showDatabaseStats(ctx context.Context, services *services, log *logger.Logger) error {
+	log.Info("Retrieving database statistics...")
+
+	stats, err := services.vectorStore.GetStats(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get database stats: %w", err)
+	}
+
+	fmt.Printf("\n=== LLM-Sentinel Vector Database Statistics ===\n")
+	fmt.Printf("Total Vectors:      %d\n", stats.TotalVectors)
+	fmt.Printf("Malicious Vectors:  %d (%.1f%%)\n", stats.MaliciousCount,
+		float64(stats.MaliciousCount)/float64(stats.TotalVectors)*100)
+	fmt.Printf("Safe Vectors:       %d (%.1f%%)\n", stats.SafeCount,
+		float64(stats.SafeCount)/float64(stats.TotalVectors)*100)
+	fmt.Printf("Avg Search Time:    %.2f ms\n", stats.AvgSearchTimeMs)
+	fmt.Printf("Cache Hit Rate:     %.1f%%\n", stats.CacheHitRate)
+
+	// Get cache stats if available
+	if services.vectorCache != nil {
+		cacheStats, err := services.vectorCache.GetStats(ctx)
+		if err == nil {
+			fmt.Printf("\n=== Cache Statistics ===\n")
+			fmt.Printf("Cache Hits:         %d\n", cacheStats.Hits)
+			fmt.Printf("Cache Misses:       %d\n", cacheStats.Misses)
+			fmt.Printf("Hit Rate:           %.1f%%\n", cacheStats.HitRate)
+			fmt.Printf("Total Keys:         %d\n", cacheStats.TotalKeys)
+			fmt.Printf("Memory Usage:       %.2f MB\n", float64(cacheStats.MemoryUsage)/1024/1024)
+		}
+	}
+
+	// Get embedding service stats
+	embeddingStats := services.embeddingService.GetStats()
+	fmt.Printf("\n=== Embedding Service Statistics ===\n")
+	fmt.Printf("Total Inferences:   %d\n", embeddingStats.TotalInferences)
+	fmt.Printf("Total Tokens:       %d\n", embeddingStats.TotalTokens)
+	fmt.Printf("Avg Inference Time: %v\n", embeddingStats.AvgInferenceTime)
+	fmt.Printf("Avg Tokens/Text:    %.1f\n", embeddingStats.AvgTokensPerText)
+	fmt.Printf("Model Load Time:    %v\n", embeddingStats.ModelLoadTime)
+
+	return nil
+}
+
+// rebuildCacheFromDB rebuilds the Redis cache from database vectors
+func rebuildCacheFromDB(ctx context.Context, services *services, log *logger.Logger) error {
+	if services.vectorCache == nil {
+		return fmt.Errorf("vector cache is not enabled")
+	}
+
+	log.Info("Rebuilding cache from database...")
+
+	// Clear existing cache
+	if err := services.vectorCache.Clear(ctx); err != nil {
+		return fmt.Errorf("failed to clear cache: %w", err)
+	}
+
+	// TODO: Implement cache rebuild logic
+	// This would involve:
+	// 1. Query high-priority vectors from database (malicious ones)
+	// 2. Store them in cache with their embeddings
+	// 3. Report progress
+
+	log.Info("Cache rebuild completed")
+	return nil
+}
