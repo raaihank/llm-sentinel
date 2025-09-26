@@ -30,6 +30,20 @@ security:
     requests_per_min: 60
     max_request_size: 1048576  # 1MB
     burst_limit: 10
+  vector_security:
+    enabled: true
+    block_threshold: 0.60
+    cache_enabled: false  # Disable cache for now
+    model:
+      model_name: "simple-security-embeddings"
+      model_path: ""
+      tokenizer_path: ""
+      vocab_path: ""
+      cache_dir: "./models/cache"
+      auto_download: false  # Use simple service for now
+      max_length: 512
+      batch_size: 32
+      model_timeout: 30s
 
 upstream:
   openai: https://api.openai.com
@@ -60,7 +74,7 @@ websocket:
   allowed_origins:
     - "*"  # Allow all origins for development
   events:
-    broadcast_requests: true
-    broadcast_detections: true
+    broadcast_pii_detections: true
+    broadcast_vector_security: true
     broadcast_system: true
     broadcast_connections: true

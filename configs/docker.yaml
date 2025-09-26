@@ -11,3 +11,17 @@ security:
     requests_per_min: 120  # Higher limit for Docker deployment
     max_request_size: 2097152  # 2MB
     burst_limit: 20
+  vector_security:
+    enabled: true
+    block_threshold: 0.70
+    cache_enabled: false
+    model:
+      model_name: "simple-security-embeddings"
+      model_path: ""
+      tokenizer_path: ""
+      vocab_path: ""
+      cache_dir: "./models/cache"
+      auto_download: false
+      max_length: 512
+      batch_size: 32
+      model_timeout: 30s

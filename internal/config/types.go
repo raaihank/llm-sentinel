@@ -37,9 +37,10 @@ type PrivacyConfig struct {
 
 // SecurityConfig contains basic security configuration
 type SecurityConfig struct {
-	Enabled   bool            `yaml:"enabled" mapstructure:"enabled"`
-	Mode      string          `yaml:"mode" mapstructure:"mode"` // block, log, or passthrough
-	RateLimit RateLimitConfig `yaml:"rate_limit" mapstructure:"rate_limit"`
+	Enabled        bool                 `yaml:"enabled" mapstructure:"enabled"`
+	Mode           string               `yaml:"mode" mapstructure:"mode"` // block, log, or passthrough
+	RateLimit      RateLimitConfig      `yaml:"rate_limit" mapstructure:"rate_limit"`
+	VectorSecurity VectorSecurityConfig `yaml:"vector_security" mapstructure:"vector_security"`
 }
 
 // RateLimitConfig contains rate limiting configuration
@@ -48,6 +49,52 @@ type RateLimitConfig struct {
 	RequestsPerMin int  `yaml:"requests_per_min" mapstructure:"requests_per_min"`
 	MaxRequestSize int  `yaml:"max_request_size" mapstructure:"max_request_size"` // bytes
 	BurstLimit     int  `yaml:"burst_limit" mapstructure:"burst_limit"`
+}
+
+// VectorSecurityConfig contains vector-based security configuration
+type VectorSecurityConfig struct {
+	Enabled        bool           `yaml:"enabled" mapstructure:"enabled"`
+	BlockThreshold float32        `yaml:"block_threshold" mapstructure:"block_threshold"` // 0.85
+	CacheEnabled   bool           `yaml:"cache_enabled" mapstructure:"cache_enabled"`
+	CacheSize      int            `yaml:"cache_size" mapstructure:"cache_size"` // 10000
+	CacheTTL       time.Duration  `yaml:"cache_ttl" mapstructure:"cache_ttl"`   // 1h
+	MaxBatchSize   int            `yaml:"max_batch_size" mapstructure:"max_batch_size"`
+	Model          ModelConfig    `yaml:"model" mapstructure:"model"`
+	Database       DatabaseConfig `yaml:"database" mapstructure:"database"`
+	Cache          CacheConfig    `yaml:"cache" mapstructure:"cache"`
+}
+
+// ModelConfig contains embedding model configuration
+type ModelConfig struct {
+	ModelName     string        `yaml:"model_name" mapstructure:"model_name"`         // "sentence-transformers/all-MiniLM-L6-v2"
+	ModelPath     string        `yaml:"model_path" mapstructure:"model_path"`         // "./models/minilm-l6-v2.onnx"
+	TokenizerPath string        `yaml:"tokenizer_path" mapstructure:"tokenizer_path"` // "./models/tokenizer.json"
+	VocabPath     string        `yaml:"vocab_path" mapstructure:"vocab_path"`         // "./models/vocab.txt"
+	CacheDir      string        `yaml:"cache_dir" mapstructure:"cache_dir"`           // "./models/cache"
+	AutoDownload  bool          `yaml:"auto_download" mapstructure:"auto_download"`   // true
+	MaxLength     int           `yaml:"max_length" mapstructure:"max_length"`         // 512
+	BatchSize     int           `yaml:"batch_size" mapstructure:"batch_size"`         // 32
+	ModelTimeout  time.Duration `yaml:"model_timeout" mapstructure:"model_timeout"`   // 30s
+}
+
+// DatabaseConfig contains vector database configuration
+type DatabaseConfig struct {
+	DatabaseURL     string        `yaml:"database_url" mapstructure:"database_url"`
+	MaxOpenConns    int           `yaml:"max_open_conns" mapstructure:"max_open_conns"`
+	MaxIdleConns    int           `yaml:"max_idle_conns" mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" mapstructure:"conn_max_lifetime"`
+	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time" mapstructure:"conn_max_idle_time"`
+}
+
+// CacheConfig contains Redis cache configuration
+type CacheConfig struct {
+	RedisURL        string        `yaml:"redis_url" mapstructure:"redis_url"`
+	MaxConnections  int           `yaml:"max_connections" mapstructure:"max_connections"`
+	MinIdleConns    int           `yaml:"min_idle_conns" mapstructure:"min_idle_conns"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" mapstructure:"conn_max_lifetime"`
+	DefaultTTL      time.Duration `yaml:"default_ttl" mapstructure:"default_ttl"`
+	MaxCacheSize    int           `yaml:"max_cache_size" mapstructure:"max_cache_size"`
+	KeyPrefix       string        `yaml:"key_prefix" mapstructure:"key_prefix"`
 }
 
 // LoggingConfig contains logging configuration
@@ -84,10 +131,10 @@ type WebSocketConfig struct {
 	MaxMessageSize  int64         `yaml:"max_message_size" mapstructure:"max_message_size"`
 	AllowedOrigins  []string      `yaml:"allowed_origins" mapstructure:"allowed_origins"`
 	Events          struct {
-		BroadcastRequests    bool `yaml:"broadcast_requests" mapstructure:"broadcast_requests"`
-		BroadcastDetections  bool `yaml:"broadcast_detections" mapstructure:"broadcast_detections"`
-		BroadcastSystem      bool `yaml:"broadcast_system" mapstructure:"broadcast_system"`
-		BroadcastConnections bool `yaml:"broadcast_connections" mapstructure:"broadcast_connections"`
+		BroadcastPIIDetections  bool `yaml:"broadcast_pii_detections" mapstructure:"broadcast_pii_detections"`
+		BroadcastVectorSecurity bool `yaml:"broadcast_vector_security" mapstructure:"broadcast_vector_security"`
+		BroadcastSystem         bool `yaml:"broadcast_system" mapstructure:"broadcast_system"`
+		BroadcastConnections    bool `yaml:"broadcast_connections" mapstructure:"broadcast_connections"`
 	} `yaml:"events" mapstructure:"events"`
 }
 
@@ -129,6 +176,41 @@ func GetDefaults() *Config {
 				MaxRequestSize: 1048576, // 1MB
 				BurstLimit:     10,
 			},
+			VectorSecurity: VectorSecurityConfig{
+				Enabled:        false, // Disabled by default until model is ready
+				BlockThreshold: 0.85,
+				CacheEnabled:   true,
+				CacheSize:      10000,
+				CacheTTL:       time.Hour,
+				MaxBatchSize:   32,
+				Model: ModelConfig{
+					ModelName:     "sentence-transformers/all-MiniLM-L6-v2",
+					ModelPath:     "./models/minilm-l6-v2.onnx",
+					TokenizerPath: "./models/tokenizer.json",
+					VocabPath:     "./models/vocab.txt",
+					CacheDir:      "./models/cache",
+					AutoDownload:  true,
+					MaxLength:     512,
+					BatchSize:     32,
+					ModelTimeout:  30 * time.Second,
+				},
+				Database: DatabaseConfig{
+					DatabaseURL:     "postgres://sentinel:sentinel_pass@localhost:5432/llm_sentinel?sslmode=disable",
+					MaxOpenConns:    20,
+					MaxIdleConns:    10,
+					ConnMaxLifetime: time.Hour,
+					ConnMaxIdleTime: 30 * time.Minute,
+				},
+				Cache: CacheConfig{
+					RedisURL:        "redis://localhost:6379",
+					MaxConnections:  20,
+					MinIdleConns:    5,
+					ConnMaxLifetime: time.Hour,
+					DefaultTTL:      time.Hour,
+					MaxCacheSize:    10000,
+					KeyPrefix:       "llm-sentinel",
+				},
+			},
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -165,15 +247,15 @@ func GetDefaults() *Config {
 			MaxMessageSize:  512,
 			AllowedOrigins:  []string{"*"}, // Allow all origins for development
 			Events: struct {
-				BroadcastRequests    bool `yaml:"broadcast_requests" mapstructure:"broadcast_requests"`
-				BroadcastDetections  bool `yaml:"broadcast_detections" mapstructure:"broadcast_detections"`
-				BroadcastSystem      bool `yaml:"broadcast_system" mapstructure:"broadcast_system"`
-				BroadcastConnections bool `yaml:"broadcast_connections" mapstructure:"broadcast_connections"`
+				BroadcastPIIDetections  bool `yaml:"broadcast_pii_detections" mapstructure:"broadcast_pii_detections"`
+				BroadcastVectorSecurity bool `yaml:"broadcast_vector_security" mapstructure:"broadcast_vector_security"`
+				BroadcastSystem         bool `yaml:"broadcast_system" mapstructure:"broadcast_system"`
+				BroadcastConnections    bool `yaml:"broadcast_connections" mapstructure:"broadcast_connections"`
 			}{
-				BroadcastRequests:    true,
-				BroadcastDetections:  true,
-				BroadcastSystem:      true,
-				BroadcastConnections: true,
+				BroadcastPIIDetections:  true,
+				BroadcastVectorSecurity: true,
+				BroadcastSystem:         true,
+				BroadcastConnections:    true,
 			},
 		},
 	}
