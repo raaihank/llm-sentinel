@@ -1,0 +1,509 @@
+package embeddings
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+)
+
+// Service handles text embedding generation using MiniLM-L6-v2
+type Service struct {
+	session   *onnxruntime.DynamicSession
+	tokenizer *SimpleTokenizer
+	config    *ModelConfig
+	logger    *zap.Logger
+	stats     *ModelStats
+	mu        sync.RWMutex
+}
+
+// SimpleTokenizer provides basic BERT-style tokenization
+type SimpleTokenizer struct {
+	vocab     map[string]int32
+	vocabSize int32
+	maxLength int
+}
+
+// NewService creates a new embedding service
+func NewService(config *ModelConfig, logger *zap.Logger) (*Service, error) {
+	service := &Service{
+		config: config,
+		logger: logger,
+		stats:  &ModelStats{},
+	}
+
+	start := time.Now()
+
+	// Ensure model files exist (download if needed)
+	if err := service.ensureModelExists(); err != nil {
+		return nil, fmt.Errorf("failed to ensure model exists: %w", err)
+	}
+
+	// Initialize ONNX Runtime
+	if err := onnxruntime.InitializeEnvironment(); err != nil {
+		return nil, fmt.Errorf("failed to initialize ONNX runtime: %w", err)
+	}
+
+	// Load the model
+	if err := service.loadModel(); err != nil {
+		return nil, fmt.Errorf("failed to load model: %w", err)
+	}
+
+	// Load tokenizer
+	if err := service.loadTokenizer(); err != nil {
+		return nil, fmt.Errorf("failed to load tokenizer: %w", err)
+	}
+
+	service.stats.ModelLoadTime = time.Since(start)
+
+	logger.Info("Embedding service initialized successfully",
+		zap.String("model_path", config.ModelPath),
+		zap.Duration("load_time", service.stats.ModelLoadTime),
+		zap.Int("max_length", config.MaxLength))
+
+	return service, nil
+}
+
+// ensureModelExists downloads model files if they don't exist
+func (s *Service) ensureModelExists() error {
+	// Check if model file exists
+	if _, err := os.Stat(s.config.ModelPath); os.IsNotExist(err) {
+		if !s.config.AutoDownload {
+			return fmt.Errorf("model file not found: %s (auto_download disabled)", s.config.ModelPath)
+		}
+
+		s.logger.Info("Model not found, downloading...",
+			zap.String("model", s.config.ModelName),
+			zap.String("cache_dir", s.config.CacheDir))
+
+		// Create cache directory
+		if err := os.MkdirAll(s.config.CacheDir, 0755); err != nil {
+			return fmt.Errorf("failed to create cache dir: %w", err)
+		}
+
+		// Download model files
+		if err := s.downloadModelFiles(); err != nil {
+			return fmt.Errorf("failed to download model: %w", err)
+		}
+	} else {
+		s.logger.Info("Using cached model", zap.String("path", s.config.ModelPath))
+	}
+
+	return nil
+}
+
+// downloadModelFiles downloads the required model files from Hugging Face
+func (s *Service) downloadModelFiles() error {
+	baseURL := fmt.Sprintf("https://huggingface.co/%s/resolve/main", s.config.ModelName)
+
+	files := map[string]string{
+		"onnx/model.onnx": s.config.ModelPath,
+		"vocab.txt":       s.config.VocabPath,
+	}
+
+	for remotePath, localPath := range files {
+		url := fmt.Sprintf("%s/%s", baseURL, remotePath)
+		s.logger.Info("Downloading file", zap.String("url", url), zap.String("path", localPath))
+
+		if err := s.downloadFile(url, localPath); err != nil {
+			return fmt.Errorf("failed to download %s: %w", remotePath, err)
+		}
+	}
+
+	s.logger.Info("Model files downloaded successfully")
+	return nil
+}
+
+// downloadFile downloads a file from URL to local path
+func (s *Service) downloadFile(url, filepath string) error {
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath[:strings.LastIndex(filepath, "/")], 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Create the file
+	out, err := os.Create(filepath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer out.Close()
+
+	// Download the file
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed with status: %d", resp.StatusCode)
+	}
+
+	// Copy data
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to save file: %w", err)
+	}
+
+	return nil
+}
+
+// loadModel loads the ONNX model
+func (s *Service) loadModel() error {
+	session, err := onnxruntime.NewDynamicSession(s.config.ModelPath)
+	if err != nil {
+		return fmt.Errorf("failed to create ONNX session: %w", err)
+	}
+
+	s.session = session
+	s.logger.Info("ONNX model loaded successfully")
+	return nil
+}
+
+// loadTokenizer loads the vocabulary for tokenization
+func (s *Service) loadTokenizer() error {
+	vocab, err := s.loadVocabulary(s.config.VocabPath)
+	if err != nil {
+		return fmt.Errorf("failed to load vocabulary: %w", err)
+	}
+
+	s.tokenizer = &SimpleTokenizer{
+		vocab:     vocab,
+		vocabSize: int32(len(vocab)),
+		maxLength: s.config.MaxLength,
+	}
+
+	s.logger.Info("Tokenizer loaded successfully",
+		zap.Int("vocab_size", len(vocab)),
+		zap.Int("max_length", s.config.MaxLength))
+
+	return nil
+}
+
+// loadVocabulary loads vocabulary from vocab.txt file
+func (s *Service) loadVocabulary(vocabPath string) (map[string]int32, error) {
+	file, err := os.Open(vocabPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open vocab file: %w", err)
+	}
+	defer file.Close()
+
+	vocab := make(map[string]int32)
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read vocab file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			vocab[line] = int32(i)
+		}
+	}
+
+	return vocab, nil
+}
+
+// GenerateEmbedding generates an embedding for a single text
+func (s *Service) GenerateEmbedding(ctx context.Context, text string) (*EmbeddingResult, error) {
+	start := time.Now()
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Tokenize input
+	tokens, err := s.tokenizer.Tokenize(text)
+	if err != nil {
+		return nil, fmt.Errorf("tokenization failed: %w", err)
+	}
+
+	// Run inference
+	embedding, err := s.runInference(tokens)
+	if err != nil {
+		return nil, fmt.Errorf("inference failed: %w", err)
+	}
+
+	duration := time.Since(start)
+
+	// Update stats
+	s.updateStats(1, len(tokens.InputIDs), duration)
+
+	return &EmbeddingResult{
+		Embedding:  embedding,
+		Duration:   duration,
+		TokenCount: tokens.TokenCount,
+	}, nil
+}
+
+// GenerateBatchEmbeddings generates embeddings for multiple texts
+func (s *Service) GenerateBatchEmbeddings(ctx context.Context, texts []string) (*BatchEmbeddingResult, error) {
+	if len(texts) == 0 {
+		return &BatchEmbeddingResult{}, nil
+	}
+
+	start := time.Now()
+	result := &BatchEmbeddingResult{
+		Embeddings: make([][]float32, 0, len(texts)),
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Process in batches
+	batchSize := s.config.BatchSize
+	if batchSize <= 0 {
+		batchSize = 32
+	}
+
+	totalTokens := 0
+	for i := 0; i < len(texts); i += batchSize {
+		end := i + batchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+
+		batch := texts[i:end]
+		batchEmbeddings, batchTokens, err := s.processBatch(batch)
+		if err != nil {
+			result.Failed += len(batch)
+			result.Errors = append(result.Errors, err)
+			s.logger.Error("Batch processing failed", zap.Error(err), zap.Int("batch_size", len(batch)))
+			continue
+		}
+
+		result.Embeddings = append(result.Embeddings, batchEmbeddings...)
+		totalTokens += batchTokens
+	}
+
+	result.Duration = time.Since(start)
+	result.TotalTokens = totalTokens
+
+	// Update stats
+	s.updateStats(int64(len(texts)-result.Failed), totalTokens, result.Duration)
+
+	return result, nil
+}
+
+// processBatch processes a batch of texts
+func (s *Service) processBatch(texts []string) ([][]float32, int, error) {
+	embeddings := make([][]float32, 0, len(texts))
+	totalTokens := 0
+
+	for _, text := range texts {
+		// Tokenize
+		tokens, err := s.tokenizer.Tokenize(text)
+		if err != nil {
+			return nil, 0, fmt.Errorf("tokenization failed for text: %w", err)
+		}
+
+		// Run inference
+		embedding, err := s.runInference(tokens)
+		if err != nil {
+			return nil, 0, fmt.Errorf("inference failed for text: %w", err)
+		}
+
+		embeddings = append(embeddings, embedding)
+		totalTokens += tokens.TokenCount
+	}
+
+	return embeddings, totalTokens, nil
+}
+
+// runInference runs ONNX model inference
+func (s *Service) runInference(tokens *TokenizerResult) ([]float32, error) {
+	// Prepare input tensors
+	inputIDs := make([]int64, len(tokens.InputIDs))
+	attentionMask := make([]int64, len(tokens.AttentionMask))
+
+	for i, id := range tokens.InputIDs {
+		inputIDs[i] = int64(id)
+	}
+	for i, mask := range tokens.AttentionMask {
+		attentionMask[i] = int64(mask)
+	}
+
+	// Create input tensors
+	inputIDsTensor, err := onnxruntime.NewTensor([]int64{1, int64(len(inputIDs))}, inputIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create input_ids tensor: %w", err)
+	}
+	defer inputIDsTensor.Destroy()
+
+	attentionTensor, err := onnxruntime.NewTensor([]int64{1, int64(len(attentionMask))}, attentionMask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create attention_mask tensor: %w", err)
+	}
+	defer attentionTensor.Destroy()
+
+	// Run inference
+	outputs, err := s.session.Run([]onnxruntime.Value{inputIDsTensor, attentionTensor})
+	if err != nil {
+		return nil, fmt.Errorf("ONNX inference failed: %w", err)
+	}
+	defer func() {
+		for _, output := range outputs {
+			output.Destroy()
+		}
+	}()
+
+	if len(outputs) == 0 {
+		return nil, fmt.Errorf("no outputs from model")
+	}
+
+	// Extract embeddings from output tensor
+	outputTensor := outputs[0]
+	outputData := outputTensor.GetData()
+
+	// Convert to float32 slice and apply mean pooling
+	floatData, ok := outputData.([]float32)
+	if !ok {
+		return nil, fmt.Errorf("unexpected output data type")
+	}
+
+	// Apply mean pooling (assuming output shape is [1, seq_len, hidden_size])
+	hiddenSize := 384 // MiniLM-L6-v2 hidden size
+	seqLen := len(floatData) / hiddenSize
+
+	pooled := make([]float32, hiddenSize)
+	for i := 0; i < hiddenSize; i++ {
+		sum := float32(0)
+		count := 0
+		for j := 0; j < seqLen; j++ {
+			if j < len(tokens.AttentionMask) && tokens.AttentionMask[j] == 1 {
+				sum += floatData[j*hiddenSize+i]
+				count++
+			}
+		}
+		if count > 0 {
+			pooled[i] = sum / float32(count)
+		}
+	}
+
+	// Normalize the embedding
+	normalized := s.normalizeVector(pooled)
+	return normalized, nil
+}
+
+// normalizeVector applies L2 normalization
+func (s *Service) normalizeVector(vector []float32) []float32 {
+	var norm float32
+	for _, v := range vector {
+		norm += v * v
+	}
+	norm = float32(math.Sqrt(float64(norm)))
+
+	if norm == 0 {
+		return vector
+	}
+
+	normalized := make([]float32, len(vector))
+	for i, v := range vector {
+		normalized[i] = v / norm
+	}
+	return normalized
+}
+
+// ComputeSimilarity computes cosine similarity between two normalized vectors
+func (s *Service) ComputeSimilarity(vec1, vec2 []float32) float32 {
+	if len(vec1) != len(vec2) {
+		return 0
+	}
+
+	var dot float32
+	for i := range vec1 {
+		dot += vec1[i] * vec2[i]
+	}
+	return dot
+}
+
+// GetStats returns model performance statistics
+func (s *Service) GetStats() *ModelStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Create a copy to avoid race conditions
+	stats := *s.stats
+	return &stats
+}
+
+// updateStats updates performance statistics
+func (s *Service) updateStats(inferences int64, tokens int, duration time.Duration) {
+	s.stats.TotalInferences += inferences
+	s.stats.TotalTokens += int64(tokens)
+	s.stats.LastInferenceTime = time.Now()
+
+	// Update average inference time
+	if s.stats.TotalInferences > 0 {
+		totalDuration := time.Duration(s.stats.TotalInferences) * s.stats.AvgInferenceTime
+		s.stats.AvgInferenceTime = (totalDuration + duration) / time.Duration(s.stats.TotalInferences)
+	} else {
+		s.stats.AvgInferenceTime = duration
+	}
+
+	// Update average tokens per text
+	if s.stats.TotalInferences > 0 {
+		s.stats.AvgTokensPerText = float64(s.stats.TotalTokens) / float64(s.stats.TotalInferences)
+	}
+}
+
+// Close cleans up resources
+func (s *Service) Close() error {
+	if s.session != nil {
+		s.session.Destroy()
+	}
+	onnxruntime.DestroyEnvironment()
+	return nil
+}
+
+// Tokenize tokenizes input text using simple BERT-style tokenization
+func (t *SimpleTokenizer) Tokenize(text string) (*TokenizerResult, error) {
+	// Simple tokenization - split by whitespace and punctuation
+	text = strings.ToLower(strings.TrimSpace(text))
+
+	// Basic tokenization (this is simplified - real BERT tokenizer is more complex)
+	tokens := strings.Fields(text)
+
+	// Add special tokens
+	inputTokens := []string{"[CLS]"}
+	inputTokens = append(inputTokens, tokens...)
+	inputTokens = append(inputTokens, "[SEP]")
+
+	// Truncate if too long
+	if len(inputTokens) > t.maxLength {
+		inputTokens = inputTokens[:t.maxLength-1]
+		inputTokens = append(inputTokens, "[SEP]")
+	}
+
+	// Convert to IDs
+	inputIDs := make([]int32, len(inputTokens))
+	attentionMask := make([]int32, len(inputTokens))
+
+	for i, token := range inputTokens {
+		if id, exists := t.vocab[token]; exists {
+			inputIDs[i] = id
+		} else {
+			inputIDs[i] = t.vocab["[UNK]"] // Unknown token
+		}
+		attentionMask[i] = 1
+	}
+
+	// Pad to max length
+	for len(inputIDs) < t.maxLength {
+		inputIDs = append(inputIDs, 0) // PAD token
+		attentionMask = append(attentionMask, 0)
+	}
+
+	return &TokenizerResult{
+		InputIDs:      inputIDs,
+		AttentionMask: attentionMask,
+		TokenCount:    len(inputTokens),
+	}, nil
+}
