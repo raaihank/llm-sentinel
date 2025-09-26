@@ -311,15 +311,6 @@ We welcome contributions! Please open an issue or submit a pull request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- Built with [Go](https://golang.org/) for performance and reliability
-- Uses [Gorilla Mux](https://github.com/gorilla/mux) for HTTP routing
-- WebSocket support via [Gorilla WebSocket](https://github.com/gorilla/websocket)
-- Configuration management with [Viper](https://github.com/spf13/viper)
-- Structured logging with [Zap](https://github.com/uber-go/zap)
-
-
 ---
 
 **Made with ❤️ for the AI community. Secure your LLMs without compromising performance.**
