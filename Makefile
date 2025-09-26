@@ -21,6 +21,12 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=$(CGO_ENABLED) go build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/sentinel
 
+# Build ETL binary
+build-etl:
+	@echo "Building ETL pipeline..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/sentinel-etl ./cmd/etl
+
 # Build for multiple platforms
 build-all:
 	@echo "Building for multiple platforms..."
@@ -62,6 +68,16 @@ run: build
 dev:
 	@echo "Running in development mode..."
 	go run ./cmd/sentinel --config configs/default.yaml
+
+# Run ETL pipeline with sample data
+etl-sample:
+	@echo "Running ETL pipeline with sample data..."
+	go run ./cmd/etl --config configs/default.yaml --input data/sample_security_dataset.csv --batch-size 10
+
+# Show database statistics
+etl-stats:
+	@echo "Showing database statistics..."
+	go run ./cmd/etl --config configs/default.yaml --stats
 
 # Install the binary to $GOPATH/bin
 install:

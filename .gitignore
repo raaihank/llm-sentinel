@@ -85,3 +85,6 @@ PLAN.md
 TESTING.md
 TESTING.md
 logs/
+balanced_sample.csv
+venv/
+dist/
