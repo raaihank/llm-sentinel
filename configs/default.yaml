@@ -9,7 +9,7 @@ server:
 privacy:
   enabled: true
   detectors:
-    - all  # Enable all 83+ detectors
+    - all  # Enable all 50+ detectors
   masking:
     type: deterministic
     format: "[MASKED_{{TYPE}}]"
@@ -24,10 +24,12 @@ privacy:
 
 security:
   enabled: true
-  mode: block  # block, log, or passthrough
-  thresholds:
-    injection: 0.7
-    jailbreak: 0.8
+  mode: log  # block, log, or passthrough
+  rate_limit:
+    enabled: true
+    requests_per_min: 60
+    max_request_size: 1048576  # 1MB
+    burst_limit: 10
 
 upstream:
   openai: https://api.openai.com

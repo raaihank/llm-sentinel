@@ -35,14 +35,19 @@ type PrivacyConfig struct {
 	} `yaml:"header_scrubbing" mapstructure:"header_scrubbing"`
 }
 
-// SecurityConfig contains security guardrails configuration
+// SecurityConfig contains basic security configuration
 type SecurityConfig struct {
-	Enabled    bool   `yaml:"enabled" mapstructure:"enabled"`
-	Mode       string `yaml:"mode" mapstructure:"mode"` // block, log, or passthrough
-	Thresholds struct {
-		Injection float64 `yaml:"injection" mapstructure:"injection"`
-		Jailbreak float64 `yaml:"jailbreak" mapstructure:"jailbreak"`
-	} `yaml:"thresholds" mapstructure:"thresholds"`
+	Enabled   bool            `yaml:"enabled" mapstructure:"enabled"`
+	Mode      string          `yaml:"mode" mapstructure:"mode"` // block, log, or passthrough
+	RateLimit RateLimitConfig `yaml:"rate_limit" mapstructure:"rate_limit"`
+}
+
+// RateLimitConfig contains rate limiting configuration
+type RateLimitConfig struct {
+	Enabled        bool `yaml:"enabled" mapstructure:"enabled"`
+	RequestsPerMin int  `yaml:"requests_per_min" mapstructure:"requests_per_min"`
+	MaxRequestSize int  `yaml:"max_request_size" mapstructure:"max_request_size"` // bytes
+	BurstLimit     int  `yaml:"burst_limit" mapstructure:"burst_limit"`
 }
 
 // LoggingConfig contains logging configuration
@@ -117,13 +122,12 @@ func GetDefaults() *Config {
 		},
 		Security: SecurityConfig{
 			Enabled: true,
-			Mode:    "block",
-			Thresholds: struct {
-				Injection float64 `yaml:"injection" mapstructure:"injection"`
-				Jailbreak float64 `yaml:"jailbreak" mapstructure:"jailbreak"`
-			}{
-				Injection: 0.7,
-				Jailbreak: 0.8,
+			Mode:    "log", // Default to log mode, not block
+			RateLimit: RateLimitConfig{
+				Enabled:        true,
+				RequestsPerMin: 60,
+				MaxRequestSize: 1048576, // 1MB
+				BurstLimit:     10,
 			},
 		},
 		Logging: LoggingConfig{
