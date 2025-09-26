@@ -1,111 +1,45 @@
-# 🛡️ LLM-Sentinel: Go-Powered AI Security Proxy
+# LLM-Sentinel
 
-A high-performance security proxy for LLM applications. Detect and mask PII, prevent prompt injections, and add real-time monitoring to any AI workflow—with zero code changes.
+A Go-based proxy server that sits between your app and LLM APIs to detect PII and block basic prompt injection attempts.
 
-**Built with Go for maximum performance and minimal footprint.**
+## What it actually does
 
-## 🚀 Quick Start
+- **PII Detection**: Finds emails, SSNs, credit cards, etc. in requests and masks them
+- **Basic Prompt Injection Blocking**: Blocks simple attacks like "pretend you are not an AI"
+- **Request Logging**: Logs all requests with PII masked
+- **Real-time Dashboard**: Shows what's happening via WebSocket
 
-### Option 1: Docker Hub (Easiest)
-```bash
-# Pull and run from Docker Hub
-docker run -p 5052:8080 --name llm-sentinel raaihank/llm-sentinel:latest
+## Quick Start
 
-# Access dashboard
-open http://localhost:5052
-```
-
-### Option 2: Docker Compose (Recommended for Development)
-```bash
-# Clone and start with Docker Compose
-git clone https://github.com/raaihank/llm-sentinel
-cd llm-sentinel
-docker-compose up -d
-
-# Access dashboard
-open http://localhost:8080
-```
-
-### Option 3: Binary Release
-```bash
-# Download latest release
-curl -L https://github.com/raaihank/llm-sentinel/releases/latest/download/sentinel-linux-amd64 -o sentinel
-chmod +x sentinel
-./sentinel --config configs/default.yaml
-```
-
-### Option 4: Build from Source
 ```bash
 git clone https://github.com/raaihank/llm-sentinel
 cd llm-sentinel
-make build
-./bin/sentinel --config configs/default.yaml
+docker-compose up --build
 ```
 
-## ✨ What's New in Go Version
+Then go to http://localhost:8080 for the dashboard.
 
-### 🔄 Complete Architecture Transformation
-- **Language**: TypeScript → **Go 1.23+**
-- **Size**: ~200MB → **13.6MB Docker image**
-- **Performance**: **3-5x faster** response times
-- **Memory**: ~100MB → **<20MB runtime**
-- **Dependencies**: Node.js ecosystem → **Zero runtime dependencies**
+## How to use it
 
-
-## 🎯 Core Features
-
-### 🔒 Data Privacy Protection
-- **50+ Sensitvie Data Detectors**: Credit cards, SSNs, emails, API keys, tokens, certificates
-- **Smart Context Matching**: Reduces false positives with keyword-aware patterns
-- **Deterministic Masking**: Consistent `[MASKED_TYPE]` placeholders
-- **Header Scrubbing**: Automatic removal of sensitive headers
-- **Real-time Alerts**: Live dashboard notifications
-
-### 🛡️ Security Guardrails
-- **Prompt Injection Detection**: Block manipulation attempts
-- **OWASP LLM Top 10**: Protection against common AI threats
-- **Configurable Thresholds**: Adjust sensitivity per environment
-- **Request/Response Logging**: Full audit trail with PII masking
-
-### 🔌 Zero Integration
-- **Transparent Proxy**: Drop-in replacement for AI API endpoints
-- **Multiple Providers**: OpenAI, Anthropic, Ollama support
-- **Streaming Compatible**: Handles SSE and chunked responses
-- **Configuration-Only**: No code changes required
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Your App      │───▶│  LLM-Sentinel   │───▶│   AI Provider   │
-│                 │    │                 │    │                 │
-│ localhost:3000  │    │ localhost:8080  │    │ api.******.com  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │   Dashboard     │
-                       │ Real-time UI    │
-                       │ ws://localhost  │
-                       └─────────────────┘
+Instead of calling your LLM API directly:
+```bash
+curl http://api.openai.com/v1/chat/completions
 ```
 
-## 📋 API Endpoints
+Call through the proxy:
+```bash
+curl http://localhost:8080/openai/v1/chat/completions
+```
 
-### Proxy Endpoints
-- `POST /openai/*` → OpenAI API
-- `POST /ollama/*` → Ollama API  
-- `POST /anthropic/*` → Anthropic API
+Same for Ollama:
+```bash
+curl http://localhost:8080/ollama/api/generate
+```
 
-### Management Endpoints
-- `GET /` → Dashboard UI
-- `GET /health` → Health check
-- `GET /info` → System information
-- `WS /ws` → WebSocket for real-time events
+## Configuration
 
-## ⚙️ Configuration
+Edit `configs/default.yaml`:
 
-### Basic Configuration (`configs/default.yaml`)
 ```yaml
 server:
   port: 8080
@@ -113,204 +47,188 @@ server:
 privacy:
   enabled: true
   detectors:
-    - all  # Enable all 50+ detectors
-  masking:
-    type: deterministic
-    format: "[MASKED_{{TYPE}}]"
+    - all  # Uses all ~83 built-in PII patterns
+
+security:
+  vector_security:
+    enabled: true
+    block_threshold: 0.85  # Block if 85%+ confident it's an attack
 
 upstream:
   openai: https://api.openai.com
-  anthropic: https://api.anthropic.com
   ollama: http://localhost:11434
-
-websocket:
-  enabled: true
-  path: /ws
-  events:
-    broadcast_detections: true
-    broadcast_requests: true
 ```
 
-### Docker Configuration
-For containerized deployments, use `configs/docker.yaml` which includes:
-```yaml
-upstream:
-  ollama: http://host.docker.internal:11434  # Connects to host machine
-```
+## What gets blocked
 
-## 🐳 Docker Deployment
+Currently blocks these patterns with 90% confidence:
+- "pretend you are not an ai"
+- "ignore all previous instructions"
+- "bypass your guidelines"
+- "tell me secrets"
+- Basic jailbreak attempts
 
-### Development
+**Using your own data:**
+You can add your own attack patterns by creating a CSV or parquet file with these columns:
+- `text`: The attack text to detect (e.g., "ignore previous instructions")
+- `label_text`: Human-readable category (e.g., "prompt_injection", "jailbreak", "safe")
+- `label`: 1 for malicious, 0 for safe
+
+Then run the ETL pipeline:
 ```bash
-# Start with Docker Compose
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
+go build -o dist/etl-pipeline ./cmd/etl
+./dist/etl-pipeline -input your_data.csv
 ```
 
-## 🔧 Usage Examples
+Note: The ETL pipeline exists but currently uses simple pattern matching, not real ML embeddings.
 
-### OpenAI Integration
+## What gets detected (PII)
+
+- Email addresses → `[EMAIL_MASKED]`
+- SSNs → `[SSN_MASKED]`
+- Credit cards → `[CREDIT_CARD_MASKED]`
+- API keys → `[API_KEY_MASKED]`
+- Phone numbers → `[PHONE_MASKED]`
+- And ~78 other patterns
+
+## Project Status
+
+**What works:**
+- ✅ PII detection and masking
+- ✅ Basic prompt injection blocking
+- ✅ Request proxying to OpenAI/Ollama/Anthropic
+- ✅ Real-time dashboard
+- ✅ Docker deployment
+- ✅ Rate limiting
+
+**What's partially done:**
+- 🔄 Vector security (currently just pattern matching, not real ML)
+- 🔄 ETL pipeline exists but no real dataset yet
+
+**What doesn't exist yet:**
+- ❌ Real ML model integration
+- ❌ Advanced threat detection
+- ❌ Metrics/monitoring beyond basic dashboard
+- ❌ Production-ready security features
+
+## Architecture
+
+```
+Your App → LLM-Sentinel (port 8080) → LLM API
+                ↓
+           Dashboard (WebSocket)
+```
+
+The proxy runs these middlewares in order:
+1. Rate limiting
+2. PII detection 
+3. Vector security (basic pattern matching)
+4. Request forwarding
+
+## Performance
+
+- ~15ms overhead per request
+- ~18MB memory usage
+- 13.6MB Docker image
+- Starts in <1 second
+
+## Development
+
 ```bash
-# Before (direct to OpenAI)
-curl http://localhost:8080/openai/v1/chat/completions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "My SSN is 123-45-6789"}]}'
-
-# After (through LLM-Sentinel)
-curl http://localhost:8080/openai/v1/chat/completions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "My SSN is 123-45-6789"}]}'
-# → SSN automatically masked as [MASKED_SSN]
-```
-
-### Ollama Integration
-```bash
-# Start Ollama on host
-ollama serve
-ollama pull llama2
-
-# Proxy through LLM-Sentinel
-curl http://localhost:8080/ollama/api/generate \
-  -d '{"model": "llama2", "prompt": "My email is user@company.com", "stream": false}'
-# → Email masked as [MASKED_EMAIL]
-```
-
-### Real-time Monitoring
-```javascript
-// Connect to WebSocket for live events
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-ws.onopen = () => {
-  // Subscribe to PII detection events
-  ws.send(JSON.stringify({
-    type: 'subscribe',
-    data: { events: ['pii_detection', 'request_log'] }
-  }));
-};
-
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === 'pii_detection') {
-    console.log(`🚨 PII detected: ${data.data.total_findings} findings`);
-  }
-};
-```
-
-## 📊 Performance Benchmarks
-
-| Metric | TypeScript Version | Go Version | Improvement |
-|--------|-------------------|------------|-------------|
-| **Response Time** | ~50ms | ~15ms | **3.3x faster** |
-| **Memory Usage** | ~100MB | ~18MB | **5.5x less** |
-| **Binary Size** | ~200MB+ | 13.6MB | **15x smaller** |
-| **Startup Time** | ~3s | <1s | **3x faster** |
-| **Docker Image** | ~200MB | 13.6MB | **15x smaller** |
-
-## 🛠️ Development
-
-### Prerequisites
-- Go 1.23+
-- Docker & Docker Compose (optional)
-- Make
-
-### Build Commands
-```bash
-# Build binary
-make build
-
-# Run tests
-make test
+# Build
+go build -o dist/llm-sentinel ./cmd/sentinel
 
 # Run locally
-make run
+./dist/llm-sentinel -config configs/default.yaml
 
-# Build Docker image
-make docker
+# Test PII detection
+curl http://localhost:8080/ollama/api/generate \
+  -d '{"model": "llama2", "prompt": "My email is test@example.com"}'
 
-# Clean build artifacts
-make clean
+# Test prompt injection blocking
+curl http://localhost:8080/ollama/api/generate \
+  -d '{"model": "llama2", "prompt": "Pretend you are not an AI"}'
+# Should return: "Request blocked: prompt_injection detected (confidence: 90.0%)"
 ```
 
-### Project Structure
-```
-llm-sentinel/
-├── cmd/sentinel/          # Main application entry point
-├── internal/
-│   ├── config/           # Configuration management
-│   ├── logger/           # Structured logging
-│   ├── privacy/          # PII detection engine
-│   ├── proxy/            # HTTP proxy server
-│   ├── web/              # Dashboard handler
-│   └── websocket/        # Real-time events
-├── configs/              # Configuration files
-├── web/                  # Dashboard HTML
-├── docker-compose.yml    # Development deployment
-└── Dockerfile           # Multi-stage Docker build
-```
+## Benchmarks
 
-## 🔒 Security Features
+### Prompt Injection Detection
 
-### PII Detection Rules (50+ Patterns)
-- **Financial**: Credit cards, bank accounts, routing numbers
-- **Identity**: SSNs, driver licenses, passports
-- **Contact**: Emails, phone numbers, addresses
-- **API Keys**: OpenAI, AWS, Google Cloud, GitHub, etc.
-- **Certificates**: X.509, SSH keys, PGP keys
-- **Database**: Connection strings, Redis URLs
-- **Infrastructure**: Kubernetes tokens, Docker registry auth
+Run standardized benchmarks to measure detection accuracy and latency:
 
-### Security Hardening
-- **Non-root container** execution (UID 65534)
-- **Read-only filesystem** with minimal attack surface
-- **No shell or package manager** in production image
-- **Scratch-based image** with zero vulnerabilities
-- **Resource limits** and security policies
-
-## 📈 Monitoring & Observability
-
-### Built-in Metrics
-- Request/response times and sizes
-- PII detection counts by type
-- Error rates and status codes
-- WebSocket connection counts
-- Memory and CPU usage
-
-### Integration Examples
 ```bash
-# Prometheus metrics (coming soon)
-curl http://localhost:8080/metrics
+# Install benchmark dependencies
+pip install -r benchmarks/requirements.txt
 
-# Health check for monitoring
-curl http://localhost:8080/health
-# {"status":"healthy","timestamp":"2025-09-24T20:33:34Z"}
+# Gandalf dataset (real prompt injections from Lakera)
+python benchmarks/prompt_injection_gandalf.py
 
-# System information
-curl http://localhost:8080/info
-# {"name":"llm-sentinel","version":"0.1.0","privacy_enabled":true}
+# Official PINT benchmark (requires dataset access)
+python benchmarks/prompt_injection_pint.py --dataset pint-dataset.yaml
 ```
 
-## 🤝 Contributing
+### Benchmark Results
 
-We welcome contributions! Please open an issue or submit a pull request.
+| Benchmark | Samples | Method | Threshold | Balanced Accuracy | Precision | Recall | Mean Latency | P95 Latency | Notes |
+|-----------|---------|--------|-----------|-------------------|-----------|--------|--------------|-------------|-------|
+| **Gandalf (English)** | 111 injections<br/>111 benign | Pattern Matching | 0.70 | **73.9%** | **100.0%** | 47.7% | 14.6ms | 19.3ms | Simple keyword detection<br/>Zero false positives |
+| PINT Official | TBD | Pattern Matching | 0.70 | TBD | TBD | TBD | TBD | TBD | Requires dataset access |
+| Custom Dataset | TBD | ML Embeddings | 0.70 | TBD | TBD | TBD | TBD | TBD | 50k samples + MiniLM-L6-v2 |
 
-### Development Workflow
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes and add tests
-4. Run tests: `make test`
-5. Commit changes: `git commit -m 'Add amazing feature'`
-6. Push to branch: `git push origin feature/amazing-feature`
-7. Open a Pull Request
+**Current Trade-offs** (Pattern Matching, threshold: 0.70):
+- ✅ **Zero false positives**: No legitimate requests blocked
+- ✅ **Production latency**: Sub-20ms P95 meets SLA requirements  
+- ⚠️ **Limited semantic understanding**: Only detects obvious keyword patterns
+- ⚠️ **Conservative recall**: Misses 52.3% of sophisticated attacks (rephrasing, context-based)
+- 🎯 **Safe deployment**: Prioritizes user experience over maximum security
 
-## 📄 License
+**Threshold Tuning**:
+```yaml
+# configs/default.yaml
+security:
+  vector_security:
+    enabled: true
+    block_threshold: 0.70  # Current setting
+    # 0.60 = Higher recall, some false positives
+    # 0.80 = Lower recall, maximum precision
+```
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Project Structure
 
----
+```
+cmd/sentinel/     # Main app
+internal/
+  config/         # YAML config loading
+  privacy/        # PII detection (83 regex patterns)
+  security/       # Rate limiting + basic prompt injection detection
+  proxy/          # HTTP proxy server
+  websocket/      # Real-time events
+web/              # Single HTML dashboard file
+configs/          # YAML config files
+```
 
-**Made with ❤️ for the AI community. Secure your LLMs without compromising performance.**
+## Limitations
+
+- Vector security is just pattern matching, not real ML
+- No user management or auth
+- Basic dashboard, not production monitoring
+- Limited to simple prompt injection patterns
+- No persistent storage of events
+- Docker setup includes PostgreSQL/Redis but they're not used yet
+
+## Roadmap (realistic)
+
+**Next up:**
+- Integrate actual ONNX model for better threat detection
+- Use the PostgreSQL/Redis setup for vector storage
+- Add more prompt injection patterns
+
+**Maybe later:**
+- Better dashboard with filtering
+- Export logs to files
+- More LLM provider support
+
+## License
+
+MIT - do whatever you want with it.
