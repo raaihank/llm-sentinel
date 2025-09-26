@@ -3,12 +3,13 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	"github.com/yourusername/llm-sentinel/internal/websocket"
+	"github.com/raaihank/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -44,24 +45,8 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			zap.Int("response_size", rw.size),
 		)
 
-		// Broadcast request log event to WebSocket clients
-		requestLogEvent := websocket.Event{
-			Type:      websocket.EventTypeRequestLog,
-			Timestamp: time.Now(),
-			RequestID: requestID,
-			Data: websocket.RequestLogEvent{
-				RequestID:    requestID,
-				Method:       r.Method,
-				Path:         r.URL.Path,
-				StatusCode:   rw.statusCode,
-				ClientIP:     getClientIP(r),
-				UserAgent:    r.UserAgent(),
-				Duration:     duration,
-				RequestSize:  r.ContentLength,
-				ResponseSize: int64(rw.size),
-			},
-		}
-		s.wsHub.BroadcastEvent(requestLogEvent)
+		// Note: Only security issues (PII detections, vector threats) are broadcast via WebSocket
+		// General request logs are only written to structured logs
 	})
 }
 
@@ -141,6 +126,112 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, "privacy_findings", result.Findings)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// vectorSecurityMiddleware applies ML-based prompt security analysis
+func (s *Server) vectorSecurityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip if vector security is not enabled or not available
+		if s.vectorSecurity == nil || !s.vectorSecurity.IsEnabled() {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		requestID := getRequestID(r.Context())
+		logger := s.logger.WithRequestID(requestID)
+
+		// Read request body
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			logger.Error("Failed to read request body for vector analysis", zap.Error(err))
+			next.ServeHTTP(w, r)
+			return
+		}
+		r.Body.Close()
+
+		// Try to extract prompt from JSON body
+		var requestData map[string]interface{}
+		prompt := ""
+
+		if err := json.Unmarshal(body, &requestData); err == nil {
+			// Try common prompt fields
+			if p, ok := requestData["prompt"].(string); ok {
+				prompt = p
+			} else if p, ok := requestData["input"].(string); ok {
+				prompt = p
+			} else if messages, ok := requestData["messages"].([]interface{}); ok {
+				// Handle OpenAI-style messages
+				if len(messages) > 0 {
+					if msg, ok := messages[len(messages)-1].(map[string]interface{}); ok {
+						if content, ok := msg["content"].(string); ok {
+							prompt = content
+						}
+					}
+				}
+			}
+		}
+
+		// If we found a prompt, analyze it
+		if prompt != "" {
+			result, err := s.vectorSecurity.AnalyzePrompt(r.Context(), prompt)
+			if err != nil {
+				logger.Error("Vector security analysis failed", zap.Error(err))
+			} else {
+				// Log the analysis result
+				logger.Info("Vector security analysis completed",
+					zap.Bool("is_malicious", result.IsMalicious),
+					zap.String("attack_type", result.AttackType),
+					zap.Float32("confidence", result.Confidence),
+					zap.Duration("processing_time", result.ProcessingTime))
+
+				// Broadcast vector security event
+				if result.IsMalicious || result.Confidence > 0.5 { // Broadcast even medium confidence
+					action := "logged"
+					if result.IsMalicious && result.Confidence >= s.vectorSecurity.GetBlockThreshold() {
+						action = "blocked"
+					}
+
+					vectorEvent := websocket.Event{
+						Type:      websocket.EventTypeVectorSecurity,
+						Timestamp: time.Now(),
+						RequestID: requestID,
+						Data: websocket.VectorSecurityEvent{
+							RequestID:    requestID,
+							Method:       r.Method,
+							Path:         r.URL.Path,
+							ClientIP:     getClientIP(r),
+							UserAgent:    r.UserAgent(),
+							IsMalicious:  result.IsMalicious,
+							AttackType:   result.AttackType,
+							Confidence:   result.Confidence,
+							Similarity:   result.SimilarityScore,
+							MatchedText:  result.MatchedText,
+							Action:       action,
+							ProcessingMS: float64(result.ProcessingTime.Nanoseconds()) / 1e6,
+						},
+					}
+					s.wsHub.BroadcastEvent(vectorEvent)
+				}
+
+				// Block request if malicious and above threshold
+				if result.IsMalicious && result.Confidence >= s.vectorSecurity.GetBlockThreshold() {
+					logger.Warn("Blocking malicious request",
+						zap.String("attack_type", result.AttackType),
+						zap.Float32("confidence", result.Confidence))
+
+					http.Error(w, fmt.Sprintf("Request blocked: %s detected (confidence: %.1f%%)",
+						result.AttackType, result.Confidence*100), http.StatusForbidden)
+					return
+				}
+			}
+		}
+
+		// Restore request body for next middleware
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+
+		next.ServeHTTP(w, r)
 	})
 }
 

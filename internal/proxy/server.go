@@ -7,22 +7,25 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/yourusername/llm-sentinel/internal/config"
-	"github.com/yourusername/llm-sentinel/internal/logger"
-	"github.com/yourusername/llm-sentinel/internal/privacy"
-	"github.com/yourusername/llm-sentinel/internal/web"
-	"github.com/yourusername/llm-sentinel/internal/websocket"
+	"github.com/raaihank/llm-sentinel/internal/config"
+	"github.com/raaihank/llm-sentinel/internal/embeddings"
+	"github.com/raaihank/llm-sentinel/internal/logger"
+	"github.com/raaihank/llm-sentinel/internal/privacy"
+	"github.com/raaihank/llm-sentinel/internal/security"
+	"github.com/raaihank/llm-sentinel/internal/web"
+	"github.com/raaihank/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
 )
 
 // Server represents the main proxy server
 type Server struct {
-	config   *config.Config
-	logger   *logger.Logger
-	detector *privacy.Detector
-	router   *mux.Router
-	server   *http.Server
-	wsHub    *websocket.Hub
+	config         *config.Config
+	logger         *logger.Logger
+	detector       *privacy.Detector
+	vectorSecurity security.VectorSecurityAnalyzer
+	router         *mux.Router
+	server         *http.Server
+	wsHub          *websocket.Hub
 }
 
 // New creates a new proxy server instance
@@ -33,19 +36,51 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 		return nil, fmt.Errorf("failed to create privacy detector: %w", err)
 	}
 
-	// Create WebSocket hub
-	wsHub := websocket.NewHub(log.WithComponent("websocket").Logger)
+	// Create vector security engine if enabled
+	var vectorSecurity security.VectorSecurityAnalyzer
+	if cfg.Security.VectorSecurity.Enabled {
+		// Create simple embedding service
+		embeddingModelConfig := embeddings.ModelConfig{
+			ModelName:    cfg.Security.VectorSecurity.Model.ModelName,
+			ModelPath:    cfg.Security.VectorSecurity.Model.ModelPath,
+			CacheDir:     cfg.Security.VectorSecurity.Model.CacheDir,
+			AutoDownload: cfg.Security.VectorSecurity.Model.AutoDownload,
+			MaxLength:    cfg.Security.VectorSecurity.Model.MaxLength,
+			BatchSize:    cfg.Security.VectorSecurity.Model.BatchSize,
+		}
+		embeddingService, err := embeddings.NewSimpleService(&embeddingModelConfig, log.WithComponent("embeddings").Logger)
+		if err != nil {
+			log.Warn("Failed to create embedding service, vector security disabled", zap.Error(err))
+		} else {
+			vectorSecurity = security.NewSimpleVectorSecurityEngine(
+				embeddingService,
+				&cfg.Security.VectorSecurity,
+				log.WithComponent("vector-security").Logger,
+			)
+			log.Info("Vector security engine initialized")
+		}
+	}
+
+	// Create WebSocket hub with configuration
+	hubConfig := &websocket.HubConfig{
+		BroadcastPIIDetections:  cfg.WebSocket.Events.BroadcastPIIDetections,
+		BroadcastVectorSecurity: cfg.WebSocket.Events.BroadcastVectorSecurity,
+		BroadcastSystem:         cfg.WebSocket.Events.BroadcastSystem,
+		BroadcastConnections:    cfg.WebSocket.Events.BroadcastConnections,
+	}
+	wsHub := websocket.NewHub(hubConfig, log.WithComponent("websocket").Logger)
 
 	// Create router
 	router := mux.NewRouter()
 
 	// Create server
 	server := &Server{
-		config:   cfg,
-		logger:   log.WithComponent("proxy"),
-		detector: detector,
-		router:   router,
-		wsHub:    wsHub,
+		config:         cfg,
+		logger:         log.WithComponent("proxy"),
+		detector:       detector,
+		vectorSecurity: vectorSecurity,
+		router:         router,
+		wsHub:          wsHub,
 	}
 
 	// Setup routes
@@ -82,18 +117,21 @@ func (s *Server) setupRoutes() {
 	openaiRouter := s.router.PathPrefix("/openai").Subrouter()
 	openaiRouter.Use(s.loggingMiddleware)
 	openaiRouter.Use(s.privacyMiddleware)
+	openaiRouter.Use(s.vectorSecurityMiddleware)
 	openaiRouter.PathPrefix("/").HandlerFunc(s.handleOpenAIProxy)
 
 	// Ollama proxy endpoints
 	ollamaRouter := s.router.PathPrefix("/ollama").Subrouter()
 	ollamaRouter.Use(s.loggingMiddleware)
 	ollamaRouter.Use(s.privacyMiddleware)
+	ollamaRouter.Use(s.vectorSecurityMiddleware)
 	ollamaRouter.PathPrefix("/").HandlerFunc(s.handleOllamaProxy)
 
 	// Anthropic proxy endpoints
 	anthropicRouter := s.router.PathPrefix("/anthropic").Subrouter()
 	anthropicRouter.Use(s.loggingMiddleware)
 	anthropicRouter.Use(s.privacyMiddleware)
+	anthropicRouter.Use(s.vectorSecurityMiddleware)
 	anthropicRouter.PathPrefix("/").HandlerFunc(s.handleAnthropicProxy)
 }
 
