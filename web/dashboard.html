@@ -219,12 +219,17 @@
             background: linear-gradient(135deg, #2a1a1a 0%, #3a2a2a 100%);
         }
         
-        .event-item.security_alert {
+        .event-item.vector_security {
             border-left-color: #ff6b35;
             background: linear-gradient(135deg, #2a1f1a 0%, #3a2f2a 100%);
         }
         
-        .event-item.request_log {
+        .event-item.system_status {
+            border-left-color: #00d4ff;
+            background: linear-gradient(135deg, #1a1f2a 0%, #2a2f3a 100%);
+        }
+        
+        .event-item.connection {
             border-left-color: #00ff88;
             background: linear-gradient(135deg, #1a2a1a 0%, #2a3a2a 100%);
         }
@@ -522,7 +527,7 @@
                 ws.send(JSON.stringify({
                     type: 'subscribe',
                     data: {
-                        events: ['pii_detection', 'request_log', 'security_alert'],
+                        events: ['pii_detection', 'vector_security', 'system_status', 'connection'],
                         filter: { exclude_health: false }
                     }
                 }));
@@ -589,11 +594,14 @@
                 case 'pii_detection':
                     handlePIIDetection(event);
                     break;
-                case 'request_log':
-                    handleRequestLog(event);
+                case 'vector_security':
+                    handleVectorSecurity(event);
                     break;
-                case 'security_alert':
-                    handleSecurityAlert(event);
+                case 'system_status':
+                    handleSystemStatus(event);
+                    break;
+                case 'connection':
+                    handleConnection(event);
                     break;
             }
             
@@ -616,39 +624,37 @@
             addActivityEvent(data.total_findings + ' PII detected in ' + data.method + ' ' + data.path);
         }
 
-        function handleRequestLog(event) {
+        function handleVectorSecurity(event) {
             const data = event.data;
-            stats.totalRequests++;
             
-            if (data.duration) {
-                const ms = parseDuration(data.duration);
-                if (ms > 0) { // Only add valid durations
-                    stats.responseTimes.push(ms);
-                    // Keep last 100 response times for better accuracy
-                    if (stats.responseTimes.length > 100) {
-                        stats.responseTimes.shift();
-                    }
-                    // Debug log for verification
-                    console.log(`Duration: ${data.duration} → ${ms.toFixed(2)}ms (avg of ${stats.responseTimes.length} samples)`);
-                }
+            if (data.is_malicious) {
+                stats.threatsBlocked++;
+                stats.promptAttacks++;
+                
+                addSecurityEvent(
+                    'Vector Security',
+                    `${data.attack_type} detected (${(data.confidence * 100).toFixed(1)}% confidence)`,
+                    'high',
+                    event.timestamp
+                );
+                
+                addActivityEvent(`🚨 ${data.attack_type} blocked (${(data.confidence * 100).toFixed(1)}% confidence)`);
             }
-            
-            addActivityEvent(data.method + ' ' + data.path + ' → ' + data.status_code + ' (' + (data.duration || 'N/A') + ')');
         }
 
-        function handleSecurityAlert(event) {
+        function handleSystemStatus(event) {
             const data = event.data;
-            stats.threatsBlocked++;
-            stats.promptAttacks++;
-            
-            addSecurityEvent(
-                'Prompt Attack',
-                'Malicious prompt detected and blocked',
-                'high',
-                event.timestamp
-            );
-            
-            addActivityEvent('🚨 Prompt attack blocked');
+            // Update system status information
+            addActivityEvent(`📊 System status: ${data.status}`);
+        }
+
+        function handleConnection(event) {
+            const data = event.data;
+            if (data.action === 'connected') {
+                addActivityEvent(`🔗 Client connected: ${data.client_ip}`);
+            } else if (data.action === 'disconnected') {
+                addActivityEvent(`🔌 Client disconnected: ${data.client_ip}`);
+            }
         }
 
         function addSecurityEvent(type, message, severity, timestamp) {
@@ -686,7 +692,7 @@
             }
             
             const eventDiv = document.createElement('div');
-            eventDiv.className = 'event-item request_log';
+            eventDiv.className = 'event-item connection';
             eventDiv.innerHTML = `
                 <div class="event-header">
                     <span class="event-type">Activity</span>

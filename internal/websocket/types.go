@@ -3,7 +3,7 @@ package websocket
 import (
 	"time"
 
-	"github.com/yourusername/llm-sentinel/internal/privacy"
+	"github.com/raaihank/llm-sentinel/internal/privacy"
 )
 
 // EventType represents the type of WebSocket event
@@ -12,8 +12,8 @@ type EventType string
 const (
 	// EventTypePIIDetection represents a PII detection event
 	EventTypePIIDetection EventType = "pii_detection"
-	// EventTypeRequestLog represents a request logging event
-	EventTypeRequestLog EventType = "request_log"
+	// EventTypeVectorSecurity represents a vector security threat detection
+	EventTypeVectorSecurity EventType = "vector_security"
 	// EventTypeSystemStatus represents a system status event
 	EventTypeSystemStatus EventType = "system_status"
 	// EventTypeConnection represents connection events
@@ -41,18 +41,20 @@ type PIIDetectionEvent struct {
 	ProcessingMS  float64           `json:"processing_ms"`
 }
 
-// RequestLogEvent represents a request logging event
-type RequestLogEvent struct {
-	RequestID    string            `json:"request_id"`
-	Method       string            `json:"method"`
-	Path         string            `json:"path"`
-	StatusCode   int               `json:"status_code"`
-	ClientIP     string            `json:"client_ip"`
-	UserAgent    string            `json:"user_agent,omitempty"`
-	Duration     time.Duration     `json:"duration"`
-	RequestSize  int64             `json:"request_size"`
-	ResponseSize int64             `json:"response_size"`
-	Headers      map[string]string `json:"headers,omitempty"`
+// VectorSecurityEvent represents a vector security threat detection
+type VectorSecurityEvent struct {
+	RequestID    string  `json:"request_id"`
+	Method       string  `json:"method"`
+	Path         string  `json:"path"`
+	ClientIP     string  `json:"client_ip"`
+	UserAgent    string  `json:"user_agent,omitempty"`
+	IsMalicious  bool    `json:"is_malicious"`
+	AttackType   string  `json:"attack_type"`
+	Confidence   float32 `json:"confidence"`
+	Similarity   float32 `json:"similarity"`
+	MatchedText  string  `json:"matched_text,omitempty"`
+	Action       string  `json:"action"` // "blocked", "logged", "allowed"
+	ProcessingMS float64 `json:"processing_ms"`
 }
 
 // SystemStatusEvent represents system status information

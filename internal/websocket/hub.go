@@ -32,6 +32,14 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// HubConfig contains configuration for the WebSocket hub
+type HubConfig struct {
+	BroadcastPIIDetections  bool
+	BroadcastVectorSecurity bool
+	BroadcastSystem         bool
+	BroadcastConnections    bool
+}
+
 // Hub maintains the set of active clients and broadcasts messages to the clients
 type Hub struct {
 	// Registered clients
@@ -45,6 +53,9 @@ type Hub struct {
 
 	// Unregister requests from clients
 	unregister chan *Client
+
+	// Configuration for event broadcasting
+	config *HubConfig
 
 	// Logger
 	logger *zap.Logger
@@ -68,12 +79,13 @@ type HubStats struct {
 }
 
 // NewHub creates a new WebSocket hub
-func NewHub(logger *zap.Logger) *Hub {
+func NewHub(config *HubConfig, logger *zap.Logger) *Hub {
 	return &Hub{
 		clients:    make(map[*Client]bool),
 		broadcast:  make(chan Event, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		config:     config,
 		logger:     logger,
 		stats:      &HubStats{},
 	}
@@ -244,16 +256,7 @@ func (h *Hub) shouldSendToClient(client *Client, event Event) bool {
 
 // applyEventFilter applies filtering logic to determine if an event should be sent
 func (h *Hub) applyEventFilter(filter *EventFilter, event Event) bool {
-	// Exclude health checks if requested
-	if filter.ExcludeHealth && event.Type == EventTypeRequestLog {
-		if logEvent, ok := event.Data.(RequestLogEvent); ok {
-			if logEvent.Path == "/health" || logEvent.Path == "/info" {
-				return false
-			}
-		}
-	}
-
-	// Add more filtering logic as needed
+	// Add filtering logic as needed for security events
 	// - MinSeverity filtering
 	// - RuleTypes filtering
 	// - IPWhitelist filtering
@@ -262,8 +265,13 @@ func (h *Hub) applyEventFilter(filter *EventFilter, event Event) bool {
 	return true
 }
 
-// BroadcastEvent sends an event to all connected clients
+// BroadcastEvent sends an event to all connected clients (only if enabled in config)
 func (h *Hub) BroadcastEvent(event Event) {
+	// Check if this event type should be broadcast based on configuration
+	if !h.shouldBroadcastEvent(event.Type) {
+		return
+	}
+
 	select {
 	case h.broadcast <- event:
 	default:
@@ -271,6 +279,26 @@ func (h *Hub) BroadcastEvent(event Event) {
 			zap.String("component", "websocket"),
 			zap.String("event_type", string(event.Type)),
 		)
+	}
+}
+
+// shouldBroadcastEvent checks if an event type should be broadcast based on configuration
+func (h *Hub) shouldBroadcastEvent(eventType EventType) bool {
+	if h.config == nil {
+		return false
+	}
+
+	switch eventType {
+	case EventTypePIIDetection:
+		return h.config.BroadcastPIIDetections
+	case EventTypeVectorSecurity:
+		return h.config.BroadcastVectorSecurity
+	case EventTypeSystemStatus:
+		return h.config.BroadcastSystem
+	case EventTypeConnection:
+		return h.config.BroadcastConnections
+	default:
+		return false
 	}
 }
 
