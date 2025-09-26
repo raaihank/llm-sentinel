@@ -51,24 +51,11 @@ make build
 - **Memory**: ~100MB → **<20MB runtime**
 - **Dependencies**: Node.js ecosystem → **Zero runtime dependencies**
 
-### 🎨 Unified Dark Dashboard
-- **Real-time monitoring** with WebSocket integration
-- **Security insights**: "X threats blocked", "X secrets detected"
-- **Live metrics**: Response times, request counts, PII findings
-- **Dark mode only** - sleek, professional interface
-- **Mobile responsive** design
-
-### 🐳 Production-Ready Containerization
-- **Multi-stage Docker build** with scratch base image
-- **Docker Compose** for easy deployment
-- **Health checks** and graceful shutdowns
-- **Volume persistence** for logs and configuration
-- **Security hardened** with non-root user
 
 ## 🎯 Core Features
 
-### 🔒 Privacy Protection
-- **50+ PII Detectors**: Credit cards, SSNs, emails, API keys, tokens, certificates
+### 🔒 Data Privacy Protection
+- **50+ Sensitvie Data Detectors**: Credit cards, SSNs, emails, API keys, tokens, certificates
 - **Smart Context Matching**: Reduces false positives with keyword-aware patterns
 - **Deterministic Masking**: Consistent `[MASKED_TYPE]` placeholders
 - **Header Scrubbing**: Automatic removal of sensitive headers
@@ -79,12 +66,6 @@ make build
 - **OWASP LLM Top 10**: Protection against common AI threats
 - **Configurable Thresholds**: Adjust sensitivity per environment
 - **Request/Response Logging**: Full audit trail with PII masking
-
-### 📊 Real-time Monitoring
-- **WebSocket Dashboard**: Live security events and metrics
-- **Performance Tracking**: Response times and request volumes
-- **PII Detection Alerts**: Real-time findings with rule breakdown
-- **Connection Monitoring**: Client connections and system health
 
 ### 🔌 Zero Integration
 - **Transparent Proxy**: Drop-in replacement for AI API endpoints
@@ -171,45 +152,12 @@ docker-compose logs -f
 docker-compose down
 ```
 
-### Production
-```bash
-# Production deployment with custom configuration
-docker run -d \
-  --name llm-sentinel-prod \
-  -p 8080:8080 \
-  -v $(pwd)/configs:/configs \
-  -v $(pwd)/logs:/logs \
-  --restart unless-stopped \
-  --memory="128m" \
-  --cpus="0.5" \
-  yourusername/llm-sentinel:latest
-
-# Includes:
-# - Resource limits
-# - Auto-restart policy
-# - Volume persistence
-# - Production-ready configuration
-```
-
-### Custom Docker Build
-```bash
-# Build custom image
-docker build -t my-llm-sentinel .
-
-# Run with custom config
-docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/configs:/configs \
-  -v $(pwd)/logs:/logs \
-  my-llm-sentinel --config /configs/my-config.yaml
-```
-
 ## 🔧 Usage Examples
 
 ### OpenAI Integration
 ```bash
 # Before (direct to OpenAI)
-curl https://api.openai.com/v1/chat/completions \
+curl http://localhost:8080/openai/v1/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "My SSN is 123-45-6789"}]}'
 

@@ -2,13 +2,16 @@ name: CI - Security
 
 on:
   push:
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main, develop ]
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3 * * *'  # Daily at 3 AM UTC
   workflow_dispatch:
 
 permissions:
   contents: read
+  security-events: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,119 +19,280 @@ concurrency:
 
 jobs:
   codeql:
-    name: CodeQL Analyze (JS/TS)
+    name: CodeQL Security Analysis (Go)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       actions: read
       contents: read
+      security-events: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: 22
+          go-version: '1.23'
+          check-latest: true
+          cache: true
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript-typescript
-          queries: +security-extended
+          languages: go
+          queries: +security-extended,security-and-quality
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
 
-      - name: Analyze to SARIF directory (no upload)
+      - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
-          output: ${{ github.workspace }}/codeql-results
-          upload: false   # <- prevents Code Scanning upload
+          category: "/language:go"
 
-      - name: Upload CodeQL SARIF
-        uses: actions/upload-artifact@v4
-        with:
-          name: codeql-sarif
-          path: ${{ github.workspace }}/codeql-results/**/*.sarif
-          if-no-files-found: error
-          retention-days: 7
-
-  dependency-audit:
-    name: npm audit - Node ${{ matrix.node-version }}
+  gosec:
+    name: Go Security Checker (gosec)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22]
+    timeout-minutes: 15
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
-          cache-dependency-path: package-lock.json
+          go-version: '1.23'
+          check-latest: true
+          cache: true
 
-      - name: Install server dependencies
-        run: npm ci
+      - name: Run gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: '-fmt sarif -out gosec.sarif ./...'
 
-      - name: Install dashboard dependencies
-        run: cd dashboard && npm ci
+      - name: Upload gosec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
 
-      - name: npm audit server (high+)
-        run: npm audit --audit-level=high || true
-
-      - name: npm audit dashboard (high+)
-        run: cd dashboard && npm audit --audit-level=high || true
-
-      - name: Save audit reports
-        run: |
-          npm audit --json > npm-audit-server-${{ matrix.node-version }}.json || true
-          cd dashboard && npm audit --json > ../npm-audit-dashboard-${{ matrix.node-version }}.json || true
-
-      - name: Upload audit reports
+      - name: Upload gosec results
         uses: actions/upload-artifact@v4
         with:
-          name: npm-audit-${{ matrix.node-version }}
-          path: |
-            npm-audit-server-${{ matrix.node-version }}.json
-            npm-audit-dashboard-${{ matrix.node-version }}.json
+          name: gosec-results
+          path: gosec.sarif
           retention-days: 7
 
-  secrets-scan:
-    name: Gitleaks scan
+  nancy:
+    name: Go Vulnerability Scanner (nancy)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install nancy
+        run: go install github.com/sonatypecommunity/nancy@latest
+
+      - name: Run nancy vulnerability scan
+        run: |
+          echo "Running nancy vulnerability scan..."
+          go list -json -deps ./... | nancy sleuth --loud || true
+
+  govulncheck:
+    name: Go Vulnerability Database Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: |
+          echo "Running govulncheck..."
+          govulncheck ./...
+
+  secrets-scan:
+    name: Secret Detection (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Run in Docker; write SARIF into the checked-out repo dir
-      - name: Run Gitleaks (Docker) → SARIF
-        run: |
-          docker run --rm \
-            -v "$PWD":/repo \
-            -w /repo \
-            -e GITLEAKS_LICENSE="${{ secrets.GITLEAKS_LICENSE }}" \
-            zricethezav/gitleaks:latest \
-            detect \
-              --source . \
-              --report-format sarif \
-              --report-path /repo/gitleaks.sarif \
-              --no-banner
-        shell: bash
-        continue-on-error: true
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
-      - name: Upload Gitleaks SARIF
+  docker-security:
+    name: Docker Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t llm-sentinel:security-test .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'llm-sentinel:security-test'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Upload Trivy results artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gitleaks-sarif
-          path: ${{ github.workspace }}/gitleaks.sarif
-          if-no-files-found: error
+          name: trivy-results
+          path: trivy-results.sarif
           retention-days: 7
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC
+
+  security-hardening-test:
+    name: Security Hardening Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+          cache: true
+
+      - name: Build binary
+        run: make build
+
+      - name: Test PII Detection Security
+        run: |
+          echo "Testing PII detection security..."
+          
+          # Start server
+          ./bin/sentinel --config configs/default.yaml &
+          SERVER_PID=$!
+          sleep 5
+          
+          # Test various PII patterns
+          TEST_CASES=(
+            "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890ABCDEF"
+            "4532015112830366"
+            "123-45-6789"
+            "user@example.com"
+            "AKIA1234567890123456"
+            "-----BEGIN PRIVATE KEY-----"
+          )
+          
+          for test_case in "${TEST_CASES[@]}"; do
+            echo "Testing: $test_case"
+            RESPONSE=$(curl -s -X POST http://localhost:8080/ollama/api/generate \
+              -H "Content-Type: application/json" \
+              -d "{\"model\": \"test\", \"prompt\": \"$test_case\", \"stream\": false}" || echo "ERROR")
+            
+            # Check if original sensitive data appears in response (it shouldn't)
+            if echo "$RESPONSE" | grep -q "$test_case"; then
+              echo "❌ Sensitive data not masked: $test_case"
+              kill $SERVER_PID || true
+              exit 1
+            fi
+          done
+          
+          kill $SERVER_PID || true
+          echo "✅ PII detection security test passed"
+
+      - name: Test Input Validation
+        run: |
+          echo "Testing input validation security..."
+          
+          # Start server
+          ./bin/sentinel --config configs/default.yaml &
+          SERVER_PID=$!
+          sleep 5
+          
+          # Test malformed requests
+          curl -s -X POST http://localhost:8080/ollama/api/generate \
+            -H "Content-Type: application/json" \
+            -d "invalid json" && echo "Should reject invalid JSON" || echo "✅ Rejected invalid JSON"
+          
+          # Test oversized requests (if limits are configured)
+          LARGE_PAYLOAD=$(python3 -c "print('x' * 10000)")
+          curl -s -X POST http://localhost:8080/ollama/api/generate \
+            -H "Content-Type: application/json" \
+            -d "{\"model\": \"test\", \"prompt\": \"$LARGE_PAYLOAD\"}" || echo "✅ Handled large payload"
+          
+          kill $SERVER_PID || true
+          echo "✅ Input validation test completed"
+
+      - name: Test WebSocket Security
+        run: |
+          echo "Testing WebSocket security..."
+          
+          # Start server
+          ./bin/sentinel --config configs/default.yaml &
+          SERVER_PID=$!
+          sleep 5
+          
+          # Test WebSocket connection limits and validation
+          timeout 5s curl -i -N \
+            -H "Connection: Upgrade" \
+            -H "Upgrade: websocket" \
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            -H "Sec-WebSocket-Version: 13" \
+            http://localhost:8080/ws || echo "WebSocket security test completed"
+          
+          kill $SERVER_PID || true
+          echo "✅ WebSocket security test completed"

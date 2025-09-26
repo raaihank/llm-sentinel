@@ -29,8 +29,9 @@ type PrivacyConfig struct {
 		Format string `yaml:"format" mapstructure:"format"`
 	} `yaml:"masking" mapstructure:"masking"`
 	HeaderScrubbing struct {
-		Enabled bool     `yaml:"enabled" mapstructure:"enabled"`
-		Headers []string `yaml:"headers" mapstructure:"headers"`
+		Enabled              bool     `yaml:"enabled" mapstructure:"enabled"`
+		Headers              []string `yaml:"headers" mapstructure:"headers"`
+		PreserveUpstreamAuth bool     `yaml:"preserve_upstream_auth" mapstructure:"preserve_upstream_auth"`
 	} `yaml:"header_scrubbing" mapstructure:"header_scrubbing"`
 }
 
@@ -105,11 +106,13 @@ func GetDefaults() *Config {
 				Format: "[MASKED_{{TYPE}}]",
 			},
 			HeaderScrubbing: struct {
-				Enabled bool     `yaml:"enabled" mapstructure:"enabled"`
-				Headers []string `yaml:"headers" mapstructure:"headers"`
+				Enabled              bool     `yaml:"enabled" mapstructure:"enabled"`
+				Headers              []string `yaml:"headers" mapstructure:"headers"`
+				PreserveUpstreamAuth bool     `yaml:"preserve_upstream_auth" mapstructure:"preserve_upstream_auth"`
 			}{
-				Enabled: true,
-				Headers: []string{"authorization", "x-api-key", "cookie"},
+				Enabled:              true,
+				Headers:              []string{"authorization", "x-api-key", "cookie"},
+				PreserveUpstreamAuth: true,
 			},
 		},
 		Security: SecurityConfig{

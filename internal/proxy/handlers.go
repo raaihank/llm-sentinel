@@ -79,6 +79,22 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, target *ur
 		req.URL.Host = target.Host
 		req.Host = target.Host
 
+		// Preserve upstream authentication headers
+		if s.config.Privacy.Enabled && s.config.Privacy.HeaderScrubbing.Enabled && s.config.Privacy.HeaderScrubbing.PreserveUpstreamAuth {
+			// Get the original request from context to restore auth headers
+			if originalHeaders, ok := req.Context().Value("original_headers").(map[string][]string); ok {
+				// Restore auth headers that were scrubbed
+				for key, values := range originalHeaders {
+					if s.detector.IsAuthHeaderPublic(key) {
+						req.Header.Del(key)
+						for _, value := range values {
+							req.Header.Add(key, value)
+						}
+					}
+				}
+			}
+		}
+
 		// Preserve original headers
 		if _, ok := req.Header["User-Agent"]; !ok {
 			req.Header.Set("User-Agent", "LLM-Sentinel/0.1.0")

@@ -2,7 +2,9 @@ name: CI - Build
 
 on:
   push:
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main, develop ]
 
 permissions:
   contents: read
@@ -13,80 +15,82 @@ concurrency:
 
 jobs:
   build:
-    name: Node ${{ matrix.node }} - Build & Test
-    runs-on: ubuntu-latest
+    name: Go ${{ matrix.go-version }} - Build & Test
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.23', '1.24']
 
     env:
-      CI: true
-      FORCE_COLOR: 1
-      NODE_ENV: production
+      CGO_ENABLED: 0
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          node-version: ${{ matrix.node }}
+          go-version: ${{ matrix.go-version }}
           check-latest: true
-          cache: npm
-          cache-dependency-path: package-lock.json
+          cache: true
 
-      - name: Install dependencies
+      - name: Verify Go installation
         run: |
-          if [ -f package-lock.json ]; then
-            echo "Installing server dependencies with npm ci..."
-            npm ci
-          else
-            echo "No lockfile found; running npm install"
-            npm install
-          fi
+          go version
+          go env GOVERSION
+          go env GOOS
+          go env GOARCH
 
-      - name: Type check
-        run: npm run typecheck
+      - name: Download dependencies
+        run: go mod download
 
-      - name: Build (server + dashboard)
-        run: npm run build
+      - name: Verify dependencies
+        run: go mod verify
 
+      - name: Build binary
+        run: |
+          echo "Building LLM-Sentinel binary..."
+          make build
+          
       - name: Verify build artifacts
+        shell: bash
         run: |
-          echo "Checking server build..."
-          test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
-          test -f dist/proxy-server.js || (echo "Missing dist/proxy-server.js" && exit 1)
-
-          echo "Checking dashboard build..."
-          test -f dist/dashboard/index.html || (echo "Missing dist/dashboard/index.html" && exit 1)
-
+          echo "Checking build artifacts..."
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            test -f bin/sentinel.exe || (echo "Missing bin/sentinel.exe" && exit 1)
+            echo "Windows binary created: bin/sentinel.exe"
+          else
+            test -f bin/sentinel || (echo "Missing bin/sentinel" && exit 1)
+            echo "Unix binary created: bin/sentinel"
+          fi
           echo "Build verification complete ✅"
 
-      - name: Test production server start
+      - name: Test binary execution
+        shell: bash
         run: |
-          echo "Testing production server startup..."
-          timeout 10s node dist/cli.js start -p 5050 &
-          SERVER_PID=$!
-          sleep 5
+          echo "Testing binary execution..."
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            ./bin/sentinel.exe --version
+            ./bin/sentinel.exe --help
+          else
+            ./bin/sentinel --version
+            ./bin/sentinel --help
+          fi
+          echo "Binary execution test passed ✅"
 
-          # Test health endpoint
-          curl -f http://localhost:5050/health || (echo "Health check failed" && exit 1)
-
-          # Test dashboard
-          curl -f http://localhost:5050 | grep -q "LLM-Sentinel" || (echo "Dashboard not loading" && exit 1)
-
-          kill $SERVER_PID || true
-          echo "Production server test passed ✅"
-
-      - name: Upload dist artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-node-${{ matrix.node }}
-          path: dist
+          name: sentinel-${{ matrix.os }}-go${{ matrix.go-version }}
+          path: |
+            bin/sentinel*
+            configs/
           if-no-files-found: error
+          retention-days: 7
 
   docker:
     name: Docker Build Test
@@ -98,26 +102,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build Docker image
         run: |
           echo "Building Docker image..."
           docker build -t llm-sentinel:test .
 
+      - name: Test Docker image size
+        run: |
+          echo "Checking Docker image size..."
+          docker images llm-sentinel:test
+          SIZE=$(docker images llm-sentinel:test --format "table {{.Size}}" | tail -1)
+          echo "Image size: $SIZE"
+
       - name: Test Docker container
         run: |
           echo "Starting Docker container..."
-          docker run -d -p 5050:5050 --name test-container llm-sentinel:test
+          docker run -d -p 8080:8080 --name test-container llm-sentinel:test
 
           # Wait for container to start
+          echo "Waiting for container to start..."
           sleep 10
 
           # Test health endpoint
-          curl -f http://localhost:5050/health || (echo "Docker health check failed" && exit 1)
+          echo "Testing health endpoint..."
+          curl -f http://localhost:8080/health || (echo "Docker health check failed" && exit 1)
+
+          # Test info endpoint
+          echo "Testing info endpoint..."
+          curl -f http://localhost:8080/info || (echo "Docker info check failed" && exit 1)
 
           # Test dashboard
-          curl -f http://localhost:5050 | grep -q "LLM-Sentinel" || (echo "Docker dashboard not loading" && exit 1)
+          echo "Testing dashboard..."
+          curl -f http://localhost:8080/ | grep -q "LLM-Sentinel" || (echo "Docker dashboard not loading" && exit 1)
 
-          # Check logs
+          # Check container logs
+          echo "Container logs:"
           docker logs test-container
 
           # Cleanup
@@ -125,3 +147,45 @@ jobs:
           docker rm test-container
 
           echo "Docker test passed ✅"
+
+  lint:
+    name: Go Lint & Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Check formatting
+        run: |
+          echo "Checking Go formatting..."
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "❌ Go files are not formatted. Run 'make fmt' to fix:"
+            gofmt -s -l .
+            exit 1
+          fi
+          echo "✅ All Go files are properly formatted"
+
+      - name: Check mod tidy
+        run: |
+          echo "Checking go mod tidy..."
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "❌ go.mod or go.sum is not tidy. Run 'go mod tidy' to fix."
+            exit 1
+          fi
+          echo "✅ go.mod and go.sum are tidy"

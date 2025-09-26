@@ -76,6 +76,15 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 		requestID := getRequestID(r.Context())
 		logger := s.logger.WithRequestID(requestID)
 
+		// Store original headers in context before processing
+		originalHeaders := make(map[string][]string)
+		for key, values := range r.Header {
+			originalHeaders[key] = make([]string, len(values))
+			copy(originalHeaders[key], values)
+		}
+		ctx := context.WithValue(r.Context(), "original_headers", originalHeaders)
+		r = r.WithContext(ctx)
+
 		// Read request body
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -85,7 +94,7 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 		}
 		r.Body.Close()
 
-		// Process headers for sensitive data
+		// Process headers for sensitive data (for logging purposes)
 		processedHeaders := s.detector.ProcessHeaders(r.Header)
 		for key, values := range processedHeaders {
 			r.Header.Del(key)
@@ -129,7 +138,7 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 		r.ContentLength = int64(len(result.MaskedText))
 
 		// Store findings in context for metrics/dashboard
-		ctx := context.WithValue(r.Context(), "privacy_findings", result.Findings)
+		ctx = context.WithValue(ctx, "privacy_findings", result.Findings)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

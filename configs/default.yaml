@@ -20,6 +20,7 @@ privacy:
       - x-api-key
       - cookie
       - x-auth-token
+    preserve_upstream_auth: true  # Allow auth headers for upstream API calls
 
 security:
   enabled: true
