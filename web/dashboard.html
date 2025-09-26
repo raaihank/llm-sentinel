@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛡️ LLM-Sentinel Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .dashboard {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 10px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 12px 0;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            border-radius: 8px;
+            border: 1px solid #333;
+            margin-bottom: 10px;
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 4px;
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .header p {
+            font-size: 0.85rem;
+            opacity: 0.8;
+            color: #b0b0b0;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .status-card {
+            background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .status-card:hover {
+            transform: translateY(-2px);
+            border-color: #00d4ff;
+            box-shadow: 0 5px 15px rgba(0, 212, 255, 0.15);
+        }
+        
+        .status-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #00d4ff, #00ff88);
+        }
+        
+        .status-icon {
+            font-size: 1.3rem;
+            margin-bottom: 4px;
+            display: block;
+        }
+        
+        .status-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            margin-bottom: 2px;
+            color: #00d4ff;
+        }
+        
+        .status-label {
+            font-size: 0.75rem;
+            color: #b0b0b0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #1a1a1a;
+            border-radius: 6px;
+            border: 1px solid #333;
+        }
+        
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #dc3545;
+            animation: pulse 2s infinite;
+        }
+        
+        .connection-dot.connected {
+            background: #00ff88;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            flex: 1;
+            min-height: 0;
+        }
+        
+        .panel {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #333;
+            flex-shrink: 0;
+        }
+        
+        .panel-title {
+            font-size: 0.95rem;
+            font-weight: bold;
+            color: #e0e0e0;
+        }
+        
+        .panel-badge {
+            background: #00d4ff;
+            color: #000;
+            padding: 2px 10px;
+            border-radius: 15px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+        
+        .events-container {
+            flex: 1;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #333 #1a1a1a;
+            min-height: 0;
+        }
+        
+        .events-container::-webkit-scrollbar {
+            width: 5px;
+        }
+        
+        .events-container::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        
+        .events-container::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+        
+        .event-item {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: #2a2a2a;
+            border-radius: 5px;
+            border-left: 3px solid #00d4ff;
+            transition: all 0.2s ease;
+        }
+        
+        .event-item:hover {
+            background: #333;
+            transform: translateX(3px);
+        }
+        
+        .event-item.pii_detection {
+            border-left-color: #ff4757;
+            background: linear-gradient(135deg, #2a1a1a 0%, #3a2a2a 100%);
+        }
+        
+        .event-item.security_alert {
+            border-left-color: #ff6b35;
+            background: linear-gradient(135deg, #2a1f1a 0%, #3a2f2a 100%);
+        }
+        
+        .event-item.request_log {
+            border-left-color: #00ff88;
+            background: linear-gradient(135deg, #1a2a1a 0%, #2a3a2a 100%);
+        }
+        
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .event-type {
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.5px;
+        }
+        
+        .event-time {
+            font-size: 0.7rem;
+            color: #888;
+        }
+        
+        .event-details {
+            font-size: 0.8rem;
+            color: #e0e0e0;
+            line-height: 1.3;
+        }
+        
+        .threat-badge {
+            display: inline-block;
+            background: #ff4757;
+            color: white;
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            margin: 2px;
+            font-weight: bold;
+        }
+        
+        .threat-badge.high {
+            background: #ff4757;
+        }
+        
+        .threat-badge.medium {
+            background: #ff6b35;
+        }
+        
+        .threat-badge.low {
+            background: #ffa502;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            justify-content: center;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            background: linear-gradient(135deg, #333 0%, #444 100%);
+            color: #e0e0e0;
+            border: 1px solid #555;
+        }
+        
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            color: #000;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #ff4757 0%, #cc3644 100%);
+            color: white;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .alert-summary {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .alert-item {
+            background: #2a2a2a;
+            padding: 8px;
+            border-radius: 5px;
+            text-align: center;
+            border-left: 3px solid #ff4757;
+        }
+        
+        .alert-count {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ff4757;
+        }
+        
+        .alert-label {
+            font-size: 0.75rem;
+            color: #b0b0b0;
+            margin-top: 2px;
+        }
+        
+        .no-data {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+        
+        @media (min-width: 1400px) {
+            .header h1 {
+                font-size: 1.8rem;
+            }
+            
+            .status-value {
+                font-size: 1.6rem;
+            }
+            
+            .panel {
+                padding: 15px;
+            }
+        }
+        
+        @media (max-width: 1024px) {
+            .dashboard {
+                padding: 8px;
+            }
+            
+            .status-grid {
+                gap: 8px;
+            }
+            
+            .status-card {
+                padding: 8px;
+            }
+            
+            .status-icon {
+                font-size: 1.1rem;
+            }
+            
+            .status-value {
+                font-size: 1.2rem;
+            }
+            
+            .status-label {
+                font-size: 0.7rem;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            
+            .status-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 6px;
+            }
+            
+            .header h1 {
+                font-size: 1.3rem;
+            }
+            
+            .controls {
+                gap: 8px;
+            }
+            
+            .btn {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>🛡️ LLM-Sentinel</h1>
+            <p>Real-time Security & Privacy Protection</p>
+        </div>
+
+        <div class="connection-status">
+            <div class="connection-dot" id="connectionDot"></div>
+            <span id="connectionText" style="font-size: 0.85rem;">Connecting to WebSocket...</span>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-card">
+                <span class="status-icon">🚨</span>
+                <div class="status-value" id="threatsBlocked">0</div>
+                <div class="status-label">Threats Blocked</div>
+            </div>
+            <div class="status-card">
+                <span class="status-icon">🔍</span>
+                <div class="status-value" id="secretsDetected">0</div>
+                <div class="status-label">Secrets Masked</div>
+            </div>
+            <div class="status-card">
+                <span class="status-icon">📊</span>
+                <div class="status-value" id="totalRequests">0</div>
+                <div class="status-label">Total Requests</div>
+            </div>
+            <div class="status-card">
+                <span class="status-icon">⚡</span>
+                <div class="status-value" id="avgResponseTime">0ms</div>
+                <div class="status-label">Avg Response</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" id="connectBtn" onclick="connect()">Connect</button>
+            <button class="btn btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button class="btn" onclick="clearEvents()">Clear Events</button>
+            <button class="btn" onclick="testSecurity()">Test Security</button>
+        </div>
+
+        <div class="main-content">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">🚨 Security Alerts</div>
+                    <div class="panel-badge" id="alertsBadge">0</div>
+                </div>
+                
+                <div class="alert-summary">
+                    <div class="alert-item">
+                        <div class="alert-count" id="promptAttacks">0</div>
+                        <div class="alert-label">Prompt Attacks</div>
+                    </div>
+                    <div class="alert-item">
+                        <div class="alert-count" id="piiFindings">0</div>
+                        <div class="alert-label">PII Detected</div>
+                    </div>
+                </div>
+                
+                <div class="events-container" id="securityEvents">
+                    <div class="no-data">No security alerts yet</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">📋 Activity Log</div>
+                    <div class="panel-badge" id="activityBadge">0</div>
+                </div>
+                <div class="events-container" id="activityLog">
+                    <div class="no-data">Waiting for activity...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let stats = {
+            threatsBlocked: 0,
+            secretsDetected: 0,
+            totalRequests: 0,
+            responseTimes: [],
+            promptAttacks: 0,
+            piiFindings: 0,
+            totalEvents: 0
+        };
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) return;
+
+            updateConnectionStatus('connecting');
+            
+            ws = new WebSocket('ws://localhost:8080/ws');
+            
+            ws.onopen = function(event) {
+                updateConnectionStatus('connected');
+                addActivityEvent('🔗 WebSocket connected successfully');
+                
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    data: {
+                        events: ['pii_detection', 'request_log', 'security_alert'],
+                        filter: { exclude_health: false }
+                    }
+                }));
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleEvent(data);
+                } catch (e) {
+                    console.error('WebSocket message error:', e);
+                }
+            };
+
+            ws.onclose = function(event) {
+                updateConnectionStatus('disconnected');
+                addActivityEvent('❌ WebSocket disconnected');
+            };
+
+            ws.onerror = function(error) {
+                updateConnectionStatus('error');
+                addActivityEvent('⚠️ WebSocket error occurred');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            const dot = document.getElementById('connectionDot');
+            const text = document.getElementById('connectionText');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            dot.className = 'connection-dot';
+            
+            switch (status) {
+                case 'connected':
+                    dot.classList.add('connected');
+                    text.textContent = 'Connected - Real-time monitoring active';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    break;
+                case 'connecting':
+                    text.textContent = 'Connecting to WebSocket...';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = true;
+                    break;
+                default:
+                    text.textContent = 'Disconnected - Click Connect to start monitoring';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+            }
+        }
+
+        function handleEvent(event) {
+            stats.totalEvents++;
+            
+            switch (event.type) {
+                case 'pii_detection':
+                    handlePIIDetection(event);
+                    break;
+                case 'request_log':
+                    handleRequestLog(event);
+                    break;
+                case 'security_alert':
+                    handleSecurityAlert(event);
+                    break;
+            }
+            
+            updateStatistics();
+        }
+
+        function handlePIIDetection(event) {
+            const data = event.data;
+            stats.secretsDetected += data.total_findings;
+            stats.piiFindings += data.total_findings;
+            
+            const findings = data.findings.map(f => f.rule_name).join(', ');
+            addSecurityEvent(
+                'PII Detection',
+                data.total_findings + ' secrets found: ' + findings,
+                'high',
+                event.timestamp
+            );
+            
+            addActivityEvent(data.total_findings + ' PII detected in ' + data.method + ' ' + data.path);
+        }
+
+        function handleRequestLog(event) {
+            const data = event.data;
+            stats.totalRequests++;
+            
+            if (data.duration) {
+                const ms = parseDuration(data.duration);
+                if (ms > 0) { // Only add valid durations
+                    stats.responseTimes.push(ms);
+                    // Keep last 100 response times for better accuracy
+                    if (stats.responseTimes.length > 100) {
+                        stats.responseTimes.shift();
+                    }
+                    // Debug log for verification
+                    console.log(`Duration: ${data.duration} → ${ms.toFixed(2)}ms (avg of ${stats.responseTimes.length} samples)`);
+                }
+            }
+            
+            addActivityEvent(data.method + ' ' + data.path + ' → ' + data.status_code + ' (' + (data.duration || 'N/A') + ')');
+        }
+
+        function handleSecurityAlert(event) {
+            const data = event.data;
+            stats.threatsBlocked++;
+            stats.promptAttacks++;
+            
+            addSecurityEvent(
+                'Prompt Attack',
+                'Malicious prompt detected and blocked',
+                'high',
+                event.timestamp
+            );
+            
+            addActivityEvent('🚨 Prompt attack blocked');
+        }
+
+        function addSecurityEvent(type, message, severity, timestamp) {
+            const container = document.getElementById('securityEvents');
+            
+            if (container.querySelector('.no-data')) {
+                container.innerHTML = '';
+            }
+            
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event-item security_alert';
+            eventDiv.innerHTML = `
+                <div class="event-header">
+                    <span class="event-type">${type}</span>
+                    <span class="event-time">${new Date(timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div class="event-details">
+                    ${message}
+                    <span class="threat-badge ${severity}">${severity.toUpperCase()}</span>
+                </div>
+            `;
+            
+            container.insertBefore(eventDiv, container.firstChild);
+            
+            while (container.children.length > 20) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function addActivityEvent(message) {
+            const container = document.getElementById('activityLog');
+            
+            if (container.querySelector('.no-data')) {
+                container.innerHTML = '';
+            }
+            
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event-item request_log';
+            eventDiv.innerHTML = `
+                <div class="event-header">
+                    <span class="event-type">Activity</span>
+                    <span class="event-time">${new Date().toLocaleTimeString()}</span>
+                </div>
+                <div class="event-details">${message}</div>
+            `;
+            
+            container.insertBefore(eventDiv, container.firstChild);
+            
+            while (container.children.length > 30) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        function updateStatistics() {
+            document.getElementById('threatsBlocked').textContent = stats.threatsBlocked;
+            document.getElementById('secretsDetected').textContent = stats.secretsDetected;
+            document.getElementById('totalRequests').textContent = stats.totalRequests;
+            document.getElementById('promptAttacks').textContent = stats.promptAttacks;
+            document.getElementById('piiFindings').textContent = stats.piiFindings;
+            document.getElementById('alertsBadge').textContent = stats.threatsBlocked + stats.secretsDetected;
+            document.getElementById('activityBadge').textContent = stats.totalEvents;
+            
+            // Calculate and display average response time
+            if (stats.responseTimes.length > 0) {
+                const sum = stats.responseTimes.reduce((a, b) => a + b, 0);
+                const avg = sum / stats.responseTimes.length;
+                
+                // Format with appropriate precision
+                let displayValue;
+                if (avg < 1) {
+                    displayValue = avg.toFixed(2) + 'ms';
+                } else if (avg < 10) {
+                    displayValue = avg.toFixed(1) + 'ms';
+                } else {
+                    displayValue = Math.round(avg) + 'ms';
+                }
+                
+                document.getElementById('avgResponseTime').textContent = displayValue;
+            } else {
+                document.getElementById('avgResponseTime').textContent = '0ms';
+            }
+        }
+
+        function clearEvents() {
+            document.getElementById('securityEvents').innerHTML = '<div class="no-data">No security alerts yet</div>';
+            document.getElementById('activityLog').innerHTML = '<div class="no-data">Waiting for activity...</div>';
+            stats = {
+                threatsBlocked: 0,
+                secretsDetected: 0,
+                totalRequests: 0,
+                responseTimes: [],
+                promptAttacks: 0,
+                piiFindings: 0,
+                totalEvents: 0
+            };
+            updateStatistics();
+        }
+
+        function testSecurity() {
+            fetch('/ollama/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: 'llama2',
+                    prompt: 'My email is admin@company.com, SSN: 123-45-6789, API key: sk-test123456789',
+                    stream: false
+                })
+            }).catch(() => {
+                addActivityEvent('🧪 Security test completed');
+            });
+        }
+
+        function parseDuration(duration) {
+            if (!duration || typeof duration !== 'string') return 0;
+            
+            // Handle Go duration format (e.g., "1.234ms", "1.234s", "123.456µs", "123456ns")
+            const match = duration.match(/^([\d.]+)(ns|µs|us|ms|s|m|h)$/);
+            if (!match) {
+                console.warn('Unable to parse duration:', duration);
+                return 0;
+            }
+            
+            const value = parseFloat(match[1]);
+            const unit = match[2];
+            
+            if (isNaN(value) || value < 0) return 0;
+            
+            switch (unit) {
+                case 'ns': return value / 1000000; // nanoseconds to milliseconds
+                case 'µs':
+                case 'us': return value / 1000;    // microseconds to milliseconds
+                case 'ms': return value;           // milliseconds
+                case 's': return value * 1000;    // seconds to milliseconds
+                case 'm': return value * 60000;   // minutes to milliseconds
+                case 'h': return value * 3600000; // hours to milliseconds
+                default: 
+                    console.warn('Unknown duration unit:', unit);
+                    return 0;
+            }
+        }
+
+        window.onload = function() {
+            connect();
+            setInterval(updateStatistics, 1000);
+        };
+    </script>
+</body>
+</html>

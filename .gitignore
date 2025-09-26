@@ -1,28 +1,23 @@
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-.npm
-.yarn-integrity
-*.tgz
-.pnpm-store/
+# Go build outputs
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
 
-# Build outputs
-build/
-.next/
-out/
-*.tsbuildinfo
-.turbo/
+# Go coverage files
+*.cover
+*.coverprofile
+coverage.txt
+coverage.html
 
-# Runtime files
-*.pid
-*.seed
-*.pid.lock
-*.coverage
-.pm2/
+# Go vendor (if using)
+vendor/
 
 # Environment files
 .env
@@ -30,6 +25,10 @@ out/
 .env.development.local
 .env.test.local
 .env.production.local
+config.local.yaml
+config.*.yaml
+!config.sample.yaml
+!configs/default.yaml
 
 # Logs
 *.log
@@ -56,9 +55,7 @@ Thumbs.db
 
 # Testing
 coverage/
-.nyc_output/
 .coverage/
-*.lcov
 
 # Temporary files
 *.tmp
@@ -66,21 +63,25 @@ coverage/
 .temp/
 .tmp/
 
-# Cache directories
-.eslintcache
-.cache/
-.parcel-cache/
-.node_repl_history
-
 # AI/ML tools
 .claude/
 .cursor/
 .sentinel/
 
-# Package manager lockfiles (optional - comment out if you want to track them)
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
-
 # Local development
 .local/
+secrets/
+creds/
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Kubernetes
+k8s-local/
+*.kubeconfig
+NEXT.md
+PLAN.md
+TESTING.md
+TESTING.md
+logs/

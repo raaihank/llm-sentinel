@@ -1,0 +1,63 @@
+# LLM-Sentinel Configuration
+
+server:
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+privacy:
+  enabled: true
+  detectors:
+    - all  # Enable all 83+ detectors
+  masking:
+    type: deterministic
+    format: "[MASKED_{{TYPE}}]"
+  header_scrubbing:
+    enabled: true
+    headers:
+      - authorization
+      - x-api-key
+      - cookie
+      - x-auth-token
+
+security:
+  enabled: true
+  mode: block  # block, log, or passthrough
+  thresholds:
+    injection: 0.7
+    jailbreak: 0.8
+
+upstream:
+  openai: https://api.openai.com
+  anthropic: https://api.anthropic.com
+  ollama: http://localhost:11434
+  timeout: 30s
+
+logging:
+  level: info
+  format: json
+  file:
+    enabled: false
+    path: logs/sentinel.log
+    max_size: 100  # MB
+    max_age: 30    # days
+    compress: true
+
+websocket:
+  enabled: true
+  path: /ws
+  max_connections: 100
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+  ping_interval: 54s
+  pong_timeout: 60s
+  write_timeout: 10s
+  max_message_size: 512
+  allowed_origins:
+    - "*"  # Allow all origins for development
+  events:
+    broadcast_requests: true
+    broadcast_detections: true
+    broadcast_system: true
+    broadcast_connections: true

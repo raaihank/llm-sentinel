@@ -1,0 +1,71 @@
+services:
+  llm-sentinel:
+    build: .
+    image: llm-sentinel:latest
+    container_name: llm-sentinel
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent logs
+      - ./logs:/logs
+      # Docker-specific configuration
+      - ./configs/docker.yaml:/configs/docker.yaml:ro
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+    # Add extra hosts for Docker Desktop compatibility
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Override default config to use Docker-specific config
+    command: ["--config", "/configs/docker.yaml"]
+    healthcheck:
+      test: ["CMD", "/sentinel", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - llm-sentinel-network
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100m
+
+networks:
+  llm-sentinel-network:
+    driver: bridge
+    name: llm-sentinel-net
+
+# Optional: Add monitoring services
+# Uncomment the following to add Prometheus monitoring
+#
+#  prometheus:
+#    image: prom/prometheus:latest
+#    container_name: llm-sentinel-prometheus
+#    ports:
+#      - "9090:9090"
+#    volumes:
+#      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+#    networks:
+#      - llm-sentinel-network
+#    depends_on:
+#      - llm-sentinel
+#
+#  grafana:
+#    image: grafana/grafana:latest
+#    container_name: llm-sentinel-grafana
+#    ports:
+#      - "3000:3000"
+#    environment:
+#      - GF_SECURITY_ADMIN_PASSWORD=admin
+#    volumes:
+#      - grafana-data:/var/lib/grafana
+#    networks:
+#      - llm-sentinel-network
+#    depends_on:
+#      - prometheus
+#
+#volumes:
+#  grafana-data:

@@ -1,86 +1,60 @@
-# Dependencies
-node_modules
-npm-debug.log*
-
-# Build outputs
-dist
-
-# Logs
-logs
-*.log
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage
-*.lcov
-
-# nyc test coverage
-.nyc_output
-
-# Dependency directories
-.npm
-.bower-*
-
-# Optional npm cache directory
-.npm
-
-# Optional REPL history
-.node_repl_history
-
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# dotenv environment variables file
-.env
-.env.test
-.env.local
-.env.production
-
-# IDE files
-.vscode
-.idea
-*.swp
-*.swo
-*~
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
 # Git
 .git
 .gitignore
 
-# Docker
-Dockerfile*
-docker-compose*
-.dockerignore
-
 # Documentation
-README.md
+*.md
 docs/
 
-# Tests
-test/
-*.test.js
-*.spec.js
+# Logs
+logs/
+*.log
 
-# PM2
-ecosystem.config.js
+# Test files
+test/
+*_test.go
+
+# Build artifacts
+bin/
+dist/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node.js (no longer needed)
+node_modules/
+package*.json
+tsconfig.json
 
 # Temporary files
-temp/
-tmp/
+*.tmp
+*.temp
+.temp/
+.tmp/
+
+# Local development
+.local/
+secrets/
+creds/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Environment files
+.env*
+config.local.yaml
+config.*.yaml
+!configs/default.yaml

@@ -1,82 +1,59 @@
-# Multi-stage build for optimal image size
-FROM node:20-alpine AS builder
+# Multi-stage build for optimal Go binary
+FROM golang:1.23-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY tsconfig.json ./
+# Copy Go modules files
+COPY go.mod go.sum ./
 
-# Copy source code first
-COPY src/ ./src/
+# Download dependencies
+RUN go mod download
 
-# Copy dashboard source files
-COPY dashboard/ ./dashboard/
+# Copy source code
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
-# Install all dependencies (including dev dependencies for building)
-RUN npm ci && npm cache clean --force
+# Build the Go binary with optimizations
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o sentinel ./cmd/sentinel
 
-# Build the main application
-RUN npm run build
+# Production stage - minimal image
+FROM scratch
 
-# Build the dashboard
-WORKDIR /app/dashboard
-RUN npm ci && npm cache clean --force
-RUN npm run build
+# Copy CA certificates for HTTPS requests
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Return to main directory
-WORKDIR /app
+# Copy timezone data
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Production stage
-FROM node:20-alpine AS production
+# Copy the binary
+COPY --from=builder /app/sentinel /sentinel
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Copy configuration files
+COPY configs/ /configs/
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S llmsentinel -u 1001
+# Copy dashboard HTML file
+COPY web/ /web/
 
-# Set working directory
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install only production dependencies (skip postinstall build script)
-RUN npm ci --only=production --ignore-scripts && npm cache clean --force
-
-# Copy built application from builder stage
-COPY --from=builder /app/dist ./dist
-
-# Copy built dashboard files to dist directory (where the server expects them)
-COPY --from=builder /app/dist/dashboard ./dist/dashboard
-
-# Create logs directory with proper permissions
-RUN mkdir -p /app/logs && chown -R llmsentinel:nodejs /app/logs
-
-# Create config directory for user configs
-RUN mkdir -p /app/.llm-sentinel && chown -R llmsentinel:nodejs /app/.llm-sentinel
-
-# Create global symlink for llmsentinel command
-RUN ln -s /app/dist/cli.js /usr/local/bin/llmsentinel && \
-    chmod +x /app/dist/cli.js
-
-# Switch to non-root user
-USER llmsentinel
+# Create directories for logs (using VOLUME for persistence)
+VOLUME ["/logs"]
 
 # Expose the default port
-EXPOSE 5050
+EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:5050/health', (res) => { \
-        process.exit(res.statusCode === 200 ? 0 : 1) \
-    }).on('error', () => process.exit(1))"
+# Health check using the binary itself
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/sentinel", "--config", "/configs/default.yaml", "--health-check"]
 
-# Use dumb-init to handle signals properly
-ENTRYPOINT ["dumb-init", "--"]
+# Run as non-root user (using numeric UID for scratch image)
+USER 65534:65534
 
 # Start the application
-CMD ["node", "dist/cli.js", "start"]
+ENTRYPOINT ["/sentinel"]
+CMD ["--config", "/configs/default.yaml"]
