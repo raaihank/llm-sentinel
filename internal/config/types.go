@@ -53,28 +53,34 @@ type RateLimitConfig struct {
 
 // VectorSecurityConfig contains vector-based security configuration
 type VectorSecurityConfig struct {
-	Enabled        bool           `yaml:"enabled" mapstructure:"enabled"`
-	BlockThreshold float32        `yaml:"block_threshold" mapstructure:"block_threshold"` // 0.85
-	CacheEnabled   bool           `yaml:"cache_enabled" mapstructure:"cache_enabled"`
-	CacheSize      int            `yaml:"cache_size" mapstructure:"cache_size"` // 10000
-	CacheTTL       time.Duration  `yaml:"cache_ttl" mapstructure:"cache_ttl"`   // 1h
-	MaxBatchSize   int            `yaml:"max_batch_size" mapstructure:"max_batch_size"`
-	Model          ModelConfig    `yaml:"model" mapstructure:"model"`
-	Database       DatabaseConfig `yaml:"database" mapstructure:"database"`
-	Cache          CacheConfig    `yaml:"cache" mapstructure:"cache"`
+	Enabled        bool                 `yaml:"enabled" mapstructure:"enabled"`
+	ServiceType    string               `yaml:"service_type" mapstructure:"service_type"` // "ml", "pattern", "hash"
+	BlockThreshold float32              `yaml:"block_threshold" mapstructure:"block_threshold"`
+	MaxBatchSize   int                  `yaml:"max_batch_size" mapstructure:"max_batch_size"`
+	Embedding      EmbeddingConfig      `yaml:"embedding" mapstructure:"embedding"`
+	Database       DatabaseConfig       `yaml:"database" mapstructure:"database"`
+}
+
+// EmbeddingConfig contains embedding service configuration
+type EmbeddingConfig struct {
+	ServiceType  string      `yaml:"service_type" mapstructure:"service_type"`   // "ml", "pattern", "hash"
+	Model        ModelConfig `yaml:"model" mapstructure:"model"`
+	RedisEnabled bool        `yaml:"redis_enabled" mapstructure:"redis_enabled"`
+	RedisURL     string      `yaml:"redis_url" mapstructure:"redis_url"`
+	RedisDB      int         `yaml:"redis_db" mapstructure:"redis_db"`
 }
 
 // ModelConfig contains embedding model configuration
 type ModelConfig struct {
-	ModelName     string        `yaml:"model_name" mapstructure:"model_name"`         // "sentence-transformers/all-MiniLM-L6-v2"
-	ModelPath     string        `yaml:"model_path" mapstructure:"model_path"`         // "./models/minilm-l6-v2.onnx"
-	TokenizerPath string        `yaml:"tokenizer_path" mapstructure:"tokenizer_path"` // "./models/tokenizer.json"
-	VocabPath     string        `yaml:"vocab_path" mapstructure:"vocab_path"`         // "./models/vocab.txt"
-	CacheDir      string        `yaml:"cache_dir" mapstructure:"cache_dir"`           // "./models/cache"
-	AutoDownload  bool          `yaml:"auto_download" mapstructure:"auto_download"`   // true
-	MaxLength     int           `yaml:"max_length" mapstructure:"max_length"`         // 512
-	BatchSize     int           `yaml:"batch_size" mapstructure:"batch_size"`         // 32
-	ModelTimeout  time.Duration `yaml:"model_timeout" mapstructure:"model_timeout"`   // 30s
+	ModelName     string        `yaml:"model_name" mapstructure:"model_name"`
+	ModelPath     string        `yaml:"model_path" mapstructure:"model_path"`
+	TokenizerPath string        `yaml:"tokenizer_path" mapstructure:"tokenizer_path"`
+	VocabPath     string        `yaml:"vocab_path" mapstructure:"vocab_path"`
+	CacheDir      string        `yaml:"cache_dir" mapstructure:"cache_dir"`
+	AutoDownload  bool          `yaml:"auto_download" mapstructure:"auto_download"`
+	MaxLength     int           `yaml:"max_length" mapstructure:"max_length"`
+	BatchSize     int           `yaml:"batch_size" mapstructure:"batch_size"`
+	ModelTimeout  time.Duration `yaml:"model_timeout" mapstructure:"model_timeout"`
 }
 
 // DatabaseConfig contains vector database configuration
@@ -86,16 +92,6 @@ type DatabaseConfig struct {
 	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time" mapstructure:"conn_max_idle_time"`
 }
 
-// CacheConfig contains Redis cache configuration
-type CacheConfig struct {
-	RedisURL        string        `yaml:"redis_url" mapstructure:"redis_url"`
-	MaxConnections  int           `yaml:"max_connections" mapstructure:"max_connections"`
-	MinIdleConns    int           `yaml:"min_idle_conns" mapstructure:"min_idle_conns"`
-	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" mapstructure:"conn_max_lifetime"`
-	DefaultTTL      time.Duration `yaml:"default_ttl" mapstructure:"default_ttl"`
-	MaxCacheSize    int           `yaml:"max_cache_size" mapstructure:"max_cache_size"`
-	KeyPrefix       string        `yaml:"key_prefix" mapstructure:"key_prefix"`
-}
 
 // LoggingConfig contains logging configuration
 type LoggingConfig struct {
@@ -177,22 +173,26 @@ func GetDefaults() *Config {
 				BurstLimit:     10,
 			},
 			VectorSecurity: VectorSecurityConfig{
-				Enabled:        false, // Disabled by default until model is ready
-				BlockThreshold: 0.85,
-				CacheEnabled:   true,
-				CacheSize:      10000,
-				CacheTTL:       time.Hour,
+				Enabled:        true,
+				ServiceType:    "ml",
+				BlockThreshold: 0.70,
 				MaxBatchSize:   32,
-				Model: ModelConfig{
-					ModelName:     "sentence-transformers/all-MiniLM-L6-v2",
-					ModelPath:     "./models/minilm-l6-v2.onnx",
-					TokenizerPath: "./models/tokenizer.json",
-					VocabPath:     "./models/vocab.txt",
-					CacheDir:      "./models/cache",
-					AutoDownload:  true,
-					MaxLength:     512,
-					BatchSize:     32,
-					ModelTimeout:  30 * time.Second,
+				Embedding: EmbeddingConfig{
+					ServiceType:  "ml",
+					RedisEnabled: true,
+					RedisURL:     "redis://localhost:6379",
+					RedisDB:      0,
+					Model: ModelConfig{
+						ModelName:     "sentence-transformers/all-MiniLM-L6-v2",
+						ModelPath:     "./models/minilm-l6-v2.onnx",
+						TokenizerPath: "./models/tokenizer.json",
+						VocabPath:     "./models/vocab.txt",
+						CacheDir:      "./models/cache",
+						AutoDownload:  true,
+						MaxLength:     512,
+						BatchSize:     32,
+						ModelTimeout:  30 * time.Second,
+					},
 				},
 				Database: DatabaseConfig{
 					DatabaseURL:     "postgres://sentinel:sentinel_pass@localhost:5432/llm_sentinel?sslmode=disable",
@@ -200,15 +200,6 @@ func GetDefaults() *Config {
 					MaxIdleConns:    10,
 					ConnMaxLifetime: time.Hour,
 					ConnMaxIdleTime: 30 * time.Minute,
-				},
-				Cache: CacheConfig{
-					RedisURL:        "redis://localhost:6379",
-					MaxConnections:  20,
-					MinIdleConns:    5,
-					ConnMaxLifetime: time.Hour,
-					DefaultTTL:      time.Hour,
-					MaxCacheSize:    10000,
-					KeyPrefix:       "llm-sentinel",
 				},
 			},
 		},
