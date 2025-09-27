@@ -556,8 +556,12 @@ func (s *MLEmbeddingService) cacheEmbedding(ctx context.Context, text string, em
 	}
 	data := strings.Join(parts, ",")
 
-	// Cache with TTL (6h)
-	if err := s.redisClient.Set(ctx, key, data, 6*time.Hour).Err(); err != nil {
+	// Cache with configured TTL (default 6h)
+	ttl := 6 * time.Hour
+	if s.config.CacheTTL > 0 {
+		ttl = s.config.CacheTTL
+	}
+	if err := s.redisClient.Set(ctx, key, data, ttl).Err(); err != nil {
 		s.logger.Error("Failed to cache embedding", zap.Error(err))
 	}
 }

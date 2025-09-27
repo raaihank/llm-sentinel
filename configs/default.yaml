@@ -32,7 +32,7 @@ security:
     burst_limit: 10
   vector_security:
     enabled: true
-    service_type: "pattern"  # Options: "ml" (best), "pattern" (balanced), "hash" (fast)
+    # service_type is defined under embedding.service_type
     block_threshold: 0.70  # Block at 70% confidence
     max_batch_size: 32
     embedding:
@@ -50,6 +50,7 @@ security:
         max_length: 512
         batch_size: 16  # Smaller batch for pattern embedding
         model_timeout: 30s
+        cache_ttl: 6h
     database:
       database_url: "postgres://sentinel:sentinel_pass@localhost:5432/llm_sentinel?sslmode=disable"
       max_open_conns: 20

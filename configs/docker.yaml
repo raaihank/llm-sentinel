@@ -10,7 +10,7 @@ security:
     burst_limit: 20
   vector_security:
     enabled: true
-    service_type: "ml"
+    # service_type is defined under embedding.service_type
     block_threshold: 0.70
     max_batch_size: 32
     embedding:
@@ -26,8 +26,9 @@ security:
         cache_dir: "/models"
         auto_download: true
         max_length: 512
-        batch_size: 32
-        model_timeout: 30s
+        batch_size: 8
+        model_timeout: 60s
+        cache_ttl: 6h
     database:
       database_url: "postgres://sentinel:sentinel_pass@postgres:5432/llm_sentinel?sslmode=disable"
       max_open_conns: 20

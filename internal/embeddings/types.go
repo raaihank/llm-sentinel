@@ -15,29 +15,30 @@ type ModelConfig struct {
 	MaxLength     int           `yaml:"max_length" mapstructure:"max_length"`         // 512
 	BatchSize     int           `yaml:"batch_size" mapstructure:"batch_size"`         // 32
 	ModelTimeout  time.Duration `yaml:"model_timeout" mapstructure:"model_timeout"`   // 30s
+	CacheTTL      time.Duration `yaml:"cache_ttl" mapstructure:"cache_ttl"`           // 6h
 }
 
 // EmbeddingResult represents the result of embedding generation
 type EmbeddingResult struct {
-	Embedding    []float32             `json:"embedding"`
-	Duration     time.Duration         `json:"duration"`
-	TokenCount   int                   `json:"token_count"`
-	Analysis     *AttackAnalysisResult `json:"analysis,omitempty"`
-	Features     *TextFeatures         `json:"features,omitempty"`
-	ServiceType  string                `json:"service_type"`
-	CacheHit     bool                  `json:"cache_hit"`
+	Embedding   []float32             `json:"embedding"`
+	Duration    time.Duration         `json:"duration"`
+	TokenCount  int                   `json:"token_count"`
+	Analysis    *AttackAnalysisResult `json:"analysis,omitempty"`
+	Features    *TextFeatures         `json:"features,omitempty"`
+	ServiceType string                `json:"service_type"`
+	CacheHit    bool                  `json:"cache_hit"`
 }
 
 // BatchEmbeddingResult represents the result of batch embedding generation
 type BatchEmbeddingResult struct {
-	Embeddings   [][]float32   `json:"embeddings"`
-	Duration     time.Duration `json:"duration"`
-	TotalTokens  int           `json:"total_tokens"`
-	Successful   int           `json:"successful"`
-	Failed       int           `json:"failed"`
-	Errors       []error       `json:"errors,omitempty"`
-	ServiceType  string        `json:"service_type"`
-	CacheHits    int           `json:"cache_hits"`
+	Embeddings  [][]float32   `json:"embeddings"`
+	Duration    time.Duration `json:"duration"`
+	TotalTokens int           `json:"total_tokens"`
+	Successful  int           `json:"successful"`
+	Failed      int           `json:"failed"`
+	Errors      []error       `json:"errors,omitempty"`
+	ServiceType string        `json:"service_type"`
+	CacheHits   int           `json:"cache_hits"`
 }
 
 // ModelStats represents model performance statistics
@@ -80,14 +81,14 @@ func (e *EmbeddingError) Error() string {
 
 // Common error types
 var (
-	ErrInvalidInput     = &EmbeddingError{Type: "invalid_input", Message: "invalid input text", Code: 1001}
-	ErrModelNotLoaded   = &EmbeddingError{Type: "model_not_loaded", Message: "model not loaded", Code: 1002}
-	ErrInferenceFailed  = &EmbeddingError{Type: "inference_failed", Message: "inference failed", Code: 1003}
-	ErrCacheError       = &EmbeddingError{Type: "cache_error", Message: "cache operation failed", Code: 1004}
-	ErrConfigError      = &EmbeddingError{Type: "config_error", Message: "configuration error", Code: 1005}
-	ErrNetworkError     = &EmbeddingError{Type: "network_error", Message: "network operation failed", Code: 1006}
-	ErrTimeoutError     = &EmbeddingError{Type: "timeout_error", Message: "operation timed out", Code: 1007}
-	ErrTokenizationFailed = &EmbeddingError{Type: "tokenization_failed", Message: "tokenization failed", Code: 1008}
+	ErrInvalidInput        = &EmbeddingError{Type: "invalid_input", Message: "invalid input text", Code: 1001}
+	ErrModelNotLoaded      = &EmbeddingError{Type: "model_not_loaded", Message: "model not loaded", Code: 1002}
+	ErrInferenceFailed     = &EmbeddingError{Type: "inference_failed", Message: "inference failed", Code: 1003}
+	ErrCacheError          = &EmbeddingError{Type: "cache_error", Message: "cache operation failed", Code: 1004}
+	ErrConfigError         = &EmbeddingError{Type: "config_error", Message: "configuration error", Code: 1005}
+	ErrNetworkError        = &EmbeddingError{Type: "network_error", Message: "network operation failed", Code: 1006}
+	ErrTimeoutError        = &EmbeddingError{Type: "timeout_error", Message: "operation timed out", Code: 1007}
+	ErrTokenizationFailed  = &EmbeddingError{Type: "tokenization_failed", Message: "tokenization failed", Code: 1008}
 	ErrModelDownloadFailed = &EmbeddingError{Type: "model_download_failed", Message: "model download failed", Code: 1009}
-	ErrInsufficientMemory = &EmbeddingError{Type: "insufficient_memory", Message: "insufficient memory for model", Code: 1010}
+	ErrInsufficientMemory  = &EmbeddingError{Type: "insufficient_memory", Message: "insufficient memory for model", Code: 1010}
 )
