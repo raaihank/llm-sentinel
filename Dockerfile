@@ -23,14 +23,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -a -installsuffix cgo \
     -o sentinel ./cmd/sentinel
 
-# Production stage - minimal image
-FROM scratch
+# Production stage - use alpine instead of scratch for better file system support
+FROM alpine:3.19
 
-# Copy CA certificates for HTTPS requests
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-# Copy timezone data
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+# Install ca-certificates (user 65534 already exists as 'nobody')
+RUN apk --no-cache add ca-certificates tzdata
 
 # Copy the binary
 COPY --from=builder /app/sentinel /sentinel
@@ -41,8 +38,13 @@ COPY configs/ /configs/
 # Copy dashboard HTML file
 COPY web/ /web/
 
-# Create directories for logs (using VOLUME for persistence)
-VOLUME ["/logs"]
+# Create directories with proper ownership (using nobody user)
+RUN mkdir -p /logs /models/cache && \
+    chown -R nobody:nobody /logs /models && \
+    chmod -R 755 /models
+
+# Create directories for logs and models (using VOLUME for persistence)
+VOLUME ["/logs", "/models"]
 
 # Expose the default port
 EXPOSE 8080
@@ -51,8 +53,8 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD ["/sentinel", "--config", "/configs/default.yaml", "--health-check"]
 
-# Run as non-root user (using numeric UID for scratch image)
-USER 65534:65534
+# Run as non-root user (nobody)
+USER nobody:nobody
 
 # Start the application
 ENTRYPOINT ["/sentinel"]

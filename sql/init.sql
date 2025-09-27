@@ -21,6 +21,7 @@ GRANT ALL ON SCHEMA public TO sentinel;
 CREATE TABLE IF NOT EXISTS security_vectors (
     id BIGSERIAL PRIMARY KEY,
     text TEXT NOT NULL,
+    text_hash VARCHAR(64) NOT NULL UNIQUE,
     label_text VARCHAR(50) NOT NULL,
     label INTEGER NOT NULL CHECK (label IN (0, 1)),
     embedding vector(384) NOT NULL,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS security_vectors (
 CREATE INDEX IF NOT EXISTS idx_security_vectors_label ON security_vectors(label);
 CREATE INDEX IF NOT EXISTS idx_security_vectors_label_text ON security_vectors(label_text);
 CREATE INDEX IF NOT EXISTS idx_security_vectors_created_at ON security_vectors(created_at);
+CREATE INDEX IF NOT EXISTS idx_security_vectors_text_hash ON security_vectors(text_hash);
 
 -- Create vector similarity index using IVFFlat
 -- This will be created after we have some data

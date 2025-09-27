@@ -55,18 +55,18 @@ services:
       # Persistent logs
       - ./logs:/logs
       # Persistent model cache
-      - model_cache:/app/models
+      - model_cache:/models
       # Docker-specific configuration
       - ./configs/docker.yaml:/configs/docker.yaml:ro
     environment:
       - TZ=UTC
       # Database connection
-      - SENTINEL_DATABASE_URL=postgres://sentinel:sentinel_pass@postgres:5432/llm_sentinel?sslmode=disable
-      - SENTINEL_REDIS_URL=redis://redis:6379
+      - SENTINEL_SECURITY_VECTOR_SECURITY_DATABASE_DATABASE_URL=postgres://sentinel:sentinel_pass@postgres:5432/llm_sentinel?sslmode=disable
+      - SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_REDIS_URL=redis:6379
       # Vector security settings
       - SENTINEL_SECURITY_VECTOR_SECURITY_ENABLED=true
-      - SENTINEL_SECURITY_VECTOR_SECURITY_MODEL_CACHE_DIR=/app/models/cache
-      - SENTINEL_SECURITY_VECTOR_SECURITY_MODEL_AUTO_DOWNLOAD=true
+      - SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_MODEL_CACHE_DIR=/models/cache
+      - SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_MODEL_AUTO_DOWNLOAD=true
     restart: unless-stopped
     # Add extra hosts for Docker Desktop compatibility
     extra_hosts:

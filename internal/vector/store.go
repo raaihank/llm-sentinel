@@ -86,14 +86,15 @@ func (s *Store) initialize() error {
 // Insert adds a new security vector to the database
 func (s *Store) Insert(ctx context.Context, vector *SecurityVector) error {
 	query := `
-		INSERT INTO security_vectors (text, label_text, label, embedding)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO security_vectors (text, text_hash, label_text, label, embedding)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, created_at, updated_at`
 
 	embeddingStr := formatEmbedding(vector.Embedding)
 
 	err := s.db.QueryRowContext(ctx, query,
 		vector.Text,
+		vector.TextHash,
 		vector.LabelText,
 		vector.Label,
 		embeddingStr,
@@ -125,12 +126,13 @@ func (s *Store) BatchInsert(ctx context.Context, vectors []*SecurityVector) (*Ba
 
 	// Prepare batch insert
 	valueStrings := make([]string, 0, len(vectors))
-	valueArgs := make([]interface{}, 0, len(vectors)*4)
+	valueArgs := make([]interface{}, 0, len(vectors)*5)
 
 	for i, vector := range vectors {
-		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d)", i*4+1, i*4+2, i*4+3, i*4+4))
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d)", i*5+1, i*5+2, i*5+3, i*5+4, i*5+5))
 		valueArgs = append(valueArgs,
 			vector.Text,
+			vector.TextHash,
 			vector.LabelText,
 			vector.Label,
 			formatEmbedding(vector.Embedding),
@@ -138,9 +140,9 @@ func (s *Store) BatchInsert(ctx context.Context, vectors []*SecurityVector) (*Ba
 	}
 
 	query := fmt.Sprintf(`
-		INSERT INTO security_vectors (text, label_text, label, embedding)
+		INSERT INTO security_vectors (text, text_hash, label_text, label, embedding)
 		VALUES %s
-		ON CONFLICT DO NOTHING`,
+		ON CONFLICT (text_hash) DO NOTHING`,
 		strings.Join(valueStrings, ","))
 
 	res, err := s.db.ExecContext(ctx, query, valueArgs...)
@@ -160,9 +162,11 @@ func (s *Store) BatchInsert(ctx context.Context, vectors []*SecurityVector) (*Ba
 	result.Inserted = inserted
 	result.Failed = int64(len(vectors)) - inserted
 	result.Duration = time.Since(start)
+	duplicates := int64(len(vectors)) - inserted - result.Failed
 
 	s.logger.Info("Batch insert completed",
 		zap.Int64("inserted", result.Inserted),
+		zap.Int64("duplicates_skipped", duplicates),
 		zap.Int64("failed", result.Failed),
 		zap.Duration("duration", result.Duration))
 
