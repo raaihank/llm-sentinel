@@ -8,6 +8,7 @@ import (
 type SecurityVector struct {
 	ID        int64     `db:"id" json:"id"`
 	Text      string    `db:"text" json:"text"`
+    EmbeddingType string `db:"embedding_type" json:"embedding_type"`
 	TextHash  string    `db:"text_hash" json:"text_hash"`
 	LabelText string    `db:"label_text" json:"label_text"`
 	Label     int       `db:"label" json:"label"`

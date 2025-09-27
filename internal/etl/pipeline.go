@@ -319,10 +319,11 @@ func (p *Pipeline) processBatch(ctx context.Context, batch []*DataRecord, result
 	}
 
 	// Create security vectors
-	vectors := make([]*vector.SecurityVector, len(batch))
+    vectors := make([]*vector.SecurityVector, len(batch))
 	for i, record := range batch {
 		vectors[i] = &vector.SecurityVector{
 			Text:      record.Text,
+            EmbeddingType: embeddingResult.ServiceType,
 			TextHash:  computeTextHash(record.Text),
 			LabelText: record.LabelText,
 			Label:     record.Label,

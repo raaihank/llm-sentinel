@@ -52,15 +52,37 @@ func NewVectorSecurityEngine(
 func (vse *VectorSecurityEngine) AnalyzePrompt(ctx context.Context, prompt string) (*SecurityResult, error) {
 	start := time.Now()
 
+	// Establish a stable analysis context to avoid immediate cancellation
+	// Prefer configured model timeout; default to 300ms if unset
+	effectiveTimeout := 300 * time.Millisecond
+	if vse.config != nil && vse.config.Embedding.Model.ModelTimeout > 0 {
+		effectiveTimeout = vse.config.Embedding.Model.ModelTimeout
+	}
+
+	// If the incoming context has an extremely short remaining deadline, detach
+	// from it to avoid immediate cancellations and use our own bounded timeout
+	var analysisCtx context.Context
+	var cancel context.CancelFunc
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < 5*time.Millisecond {
+			analysisCtx, cancel = context.WithTimeout(context.Background(), effectiveTimeout)
+		} else {
+			analysisCtx, cancel = context.WithTimeout(ctx, effectiveTimeout)
+		}
+	} else {
+		analysisCtx, cancel = context.WithTimeout(ctx, effectiveTimeout)
+	}
+	defer cancel()
+
 	// Generate embedding for the input prompt
-	embeddingResult, err := vse.embeddingService.GenerateEmbedding(ctx, prompt)
+	embeddingResult, err := vse.embeddingService.GenerateEmbedding(analysisCtx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
 	// Try cache first if available
 	if vse.cache != nil {
-		cacheResult, err := vse.cache.SearchSimilar(ctx, embeddingResult.Embedding, &cache.SearchOptions{
+		cacheResult, err := vse.cache.SearchSimilar(analysisCtx, embeddingResult.Embedding, &cache.SearchOptions{
 			MinSimilarity: vse.config.BlockThreshold,
 			MaxResults:    1,
 		})
@@ -81,7 +103,7 @@ func (vse *VectorSecurityEngine) AnalyzePrompt(ctx context.Context, prompt strin
 	}
 
 	// Fallback to database search
-	similarVectors, err := vse.vectorStore.FindSimilar(ctx, embeddingResult.Embedding, &vector.SearchOptions{
+	similarVectors, err := vse.vectorStore.FindSimilar(analysisCtx, embeddingResult.Embedding, &vector.SearchOptions{
 		Limit:         5,
 		MinSimilarity: vse.config.BlockThreshold,
 	})
@@ -99,8 +121,22 @@ func (vse *VectorSecurityEngine) AnalyzePrompt(ctx context.Context, prompt strin
 		}, nil
 	}
 
-	// Use the most similar vector
+    // Use the most similar vector
 	best := similarVectors[0]
+
+    // Enforce embedding type compatibility when available
+    if best.Vector != nil && best.Vector.EmbeddingType != "" {
+        expected := "pattern"
+        if vse.config != nil {
+            expected = vse.config.Embedding.ServiceType
+        }
+        if best.Vector.EmbeddingType != expected {
+            vse.logger.Warn("Embedding type mismatch; treating as safe",
+                zap.String("db_type", best.Vector.EmbeddingType),
+                zap.String("expected", expected))
+            return &SecurityResult{IsMalicious: false, Confidence: 0.0, AttackType: "safe", ProcessingTime: time.Since(start)}, nil
+        }
+    }
 
 	result := &SecurityResult{
 		IsMalicious:     best.Vector.Label == 1,
@@ -122,7 +158,7 @@ func (vse *VectorSecurityEngine) AnalyzePrompt(ctx context.Context, prompt strin
 			Similarity: best.Similarity,
 		}
 
-		if err := vse.cache.Store(ctx, embeddingResult.Embedding, cachedVector); err != nil {
+		if err := vse.cache.Store(analysisCtx, embeddingResult.Embedding, cachedVector); err != nil {
 			vse.logger.Warn("Failed to cache vector result", zap.Error(err))
 		}
 	}

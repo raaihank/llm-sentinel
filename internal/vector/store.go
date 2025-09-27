@@ -85,20 +85,21 @@ func (s *Store) initialize() error {
 
 // Insert adds a new security vector to the database
 func (s *Store) Insert(ctx context.Context, vector *SecurityVector) error {
-	query := `
-		INSERT INTO security_vectors (text, text_hash, label_text, label, embedding)
-		VALUES ($1, $2, $3, $4, $5)
+    query := `
+        INSERT INTO security_vectors (text, embedding_type, text_hash, label_text, label, embedding)
+        VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at, updated_at`
 
 	embeddingStr := formatEmbedding(vector.Embedding)
 
-	err := s.db.QueryRowContext(ctx, query,
-		vector.Text,
-		vector.TextHash,
-		vector.LabelText,
-		vector.Label,
-		embeddingStr,
-	).Scan(&vector.ID, &vector.CreatedAt, &vector.UpdatedAt)
+    err := s.db.QueryRowContext(ctx, query,
+        vector.Text,
+        vector.EmbeddingType,
+        vector.TextHash,
+        vector.LabelText,
+        vector.Label,
+        embeddingStr,
+    ).Scan(&vector.ID, &vector.CreatedAt, &vector.UpdatedAt)
 
 	if err != nil {
 		s.logger.Error("Failed to insert vector",
@@ -126,12 +127,13 @@ func (s *Store) BatchInsert(ctx context.Context, vectors []*SecurityVector) (*Ba
 
 	// Prepare batch insert
 	valueStrings := make([]string, 0, len(vectors))
-	valueArgs := make([]interface{}, 0, len(vectors)*5)
+    valueArgs := make([]interface{}, 0, len(vectors)*6)
 
 	for i, vector := range vectors {
-		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d)", i*5+1, i*5+2, i*5+3, i*5+4, i*5+5))
+        valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", i*6+1, i*6+2, i*6+3, i*6+4, i*6+5, i*6+6))
 		valueArgs = append(valueArgs,
 			vector.Text,
+            vector.EmbeddingType,
 			vector.TextHash,
 			vector.LabelText,
 			vector.Label,
@@ -139,8 +141,8 @@ func (s *Store) BatchInsert(ctx context.Context, vectors []*SecurityVector) (*Ba
 		)
 	}
 
-	query := fmt.Sprintf(`
-		INSERT INTO security_vectors (text, text_hash, label_text, label, embedding)
+    query := fmt.Sprintf(`
+        INSERT INTO security_vectors (text, embedding_type, text_hash, label_text, label, embedding)
 		VALUES %s
 		ON CONFLICT (text_hash) DO NOTHING`,
 		strings.Join(valueStrings, ","))

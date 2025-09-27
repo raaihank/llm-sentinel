@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/raaihank/llm-sentinel/internal/vector"
 	"go.uber.org/zap"
 )
 
@@ -22,6 +23,7 @@ type MLEmbeddingService struct {
 	shared      *SharedUtilities
 	stats       *ModelStats
 	redisClient *redis.Client
+	vectorStore *vector.Store
 	tokenizer   *Tokenizer
 	model       *TransformerModel
 	mu          sync.RWMutex
@@ -64,7 +66,7 @@ type TokenizedInput struct {
 }
 
 // NewMLEmbeddingService creates a new ML-based embedding service
-func NewMLEmbeddingService(config ModelConfig, logger *zap.Logger, redisClient *redis.Client) (*MLEmbeddingService, error) {
+func NewMLEmbeddingService(config ModelConfig, logger *zap.Logger, redisClient *redis.Client, vectorStore *vector.Store) (*MLEmbeddingService, error) {
 	start := time.Now()
 	logger.Info("Initializing ML embedding service with transformer model support",
 		zap.String("model", config.ModelName),
@@ -81,6 +83,7 @@ func NewMLEmbeddingService(config ModelConfig, logger *zap.Logger, redisClient *
 		logger:      logger,
 		shared:      shared,
 		redisClient: redisClient,
+		vectorStore: vectorStore,
 		startTime:   start,
 		stats: &ModelStats{
 			ServiceType:   "ml",
@@ -129,12 +132,8 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 
 	start := time.Now()
 
-	// Check context for cancellation
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: context cancelled", ErrTimeoutError)
-	default:
-	}
+	// Do not fail immediately on pre-cancelled or ultra-short contexts; allow caller to pass a bounded context
+	// We will respect ctx in downstream calls (Redis, DB) without pre-emptive early return here.
 
 	// Check Redis cache first (if available)
 	var cached []float32
@@ -166,12 +165,31 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 		analysis = &analysisResult
 		features = &featuresResult
 
-		// Generate embedding using ML model
-		var err error
-		embedding, err = s.generateMLEmbedding(ctx, text, analysis, features)
-		if err != nil {
-			s.updateStats(1, len(strings.Fields(text)), time.Since(start), false)
-			return nil, fmt.Errorf("failed to generate ML embedding: %w", err)
+		// Check vector database for similar attack patterns (fallback after cache miss)
+		var dbHit bool
+		if s.vectorStore != nil && analysis.IsAttack && analysis.Confidence > 0.7 {
+			if dbEmbedding, err := s.searchVectorDatabase(ctx, text, analysis); err == nil && dbEmbedding != nil {
+				embedding = dbEmbedding
+				dbHit = true
+				s.logger.Debug("Retrieved similar embedding from vector database",
+					zap.Float32("confidence", analysis.Confidence),
+					zap.String("attack_type", analysis.PrimaryAttackType))
+
+				// Cache in Redis for future use
+				if s.redisClient != nil {
+					go s.cacheEmbedding(context.Background(), text, embedding)
+				}
+			}
+		}
+
+		// Generate embedding using ML model if no DB hit
+		if !dbHit {
+			var err error
+			embedding, err = s.generateMLEmbedding(ctx, text, analysis, features)
+			if err != nil {
+				s.updateStats(1, len(strings.Fields(text)), time.Since(start), false)
+				return nil, fmt.Errorf("failed to generate ML embedding: %w", err)
+			}
 		}
 
 		// Cache in Redis if available
@@ -538,8 +556,8 @@ func (s *MLEmbeddingService) cacheEmbedding(ctx context.Context, text string, em
 	}
 	data := strings.Join(parts, ",")
 
-	// Cache for 24 hours
-	if err := s.redisClient.Set(ctx, key, data, 24*time.Hour).Err(); err != nil {
+	// Cache with TTL (6h)
+	if err := s.redisClient.Set(ctx, key, data, 6*time.Hour).Err(); err != nil {
 		s.logger.Error("Failed to cache embedding", zap.Error(err))
 	}
 }
@@ -857,4 +875,115 @@ func (s *MLEmbeddingService) HealthCheck(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// searchVectorDatabase searches for similar attack patterns in the vector database
+// Returns embedding of most similar attack pattern if found with high confidence
+func (s *MLEmbeddingService) searchVectorDatabase(ctx context.Context, text string, analysis *AttackAnalysisResult) ([]float32, error) {
+	if s.vectorStore == nil {
+		return nil, fmt.Errorf("vector store not available")
+	}
+
+	// Create a quick embedding for similarity search
+	// Use the shared pattern analysis to create a lightweight embedding
+	quickEmbedding := s.createQuickEmbedding(text, analysis)
+
+	// Search for similar attack patterns in database
+	searchOptions := &vector.SearchOptions{
+		Limit:         5,         // Get top 5 most similar
+		MinSimilarity: 0.75,      // High similarity threshold for attacks
+		LabelFilter:   intPtr(1), // Only search malicious patterns (label=1)
+	}
+
+	searchStart := time.Now()
+	results, err := s.vectorStore.FindSimilar(ctx, quickEmbedding, searchOptions)
+	searchDuration := time.Since(searchStart)
+
+	if err != nil {
+		s.logger.Debug("Vector database search failed",
+			zap.Error(err),
+			zap.Duration("search_duration", searchDuration))
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		s.logger.Debug("No similar attack patterns found in database",
+			zap.Duration("search_duration", searchDuration))
+		return nil, nil
+	}
+
+	// Use the most similar pattern if confidence is high enough
+	bestMatch := results[0]
+	if bestMatch.Similarity >= 0.85 {
+		s.logger.Info("Found highly similar attack pattern in database",
+			zap.Float32("similarity", bestMatch.Similarity),
+			zap.String("attack_type", analysis.PrimaryAttackType),
+			zap.Duration("search_duration", searchDuration),
+			zap.String("matched_text_hash", bestMatch.Vector.TextHash))
+
+		// Return the stored embedding
+		return bestMatch.Vector.Embedding, nil
+	}
+
+	s.logger.Debug("Similar patterns found but confidence too low",
+		zap.Float32("best_similarity", bestMatch.Similarity),
+		zap.Int("results_count", len(results)),
+		zap.Duration("search_duration", searchDuration))
+
+	return nil, nil
+}
+
+// createQuickEmbedding creates a lightweight embedding for database search
+func (s *MLEmbeddingService) createQuickEmbedding(text string, analysis *AttackAnalysisResult) []float32 {
+	// Use pattern-based embedding similar to hash/pattern services for quick lookup
+	embedding := make([]float32, EmbeddingDimensions)
+
+	// Use shared utilities to create deterministic features
+	hash := s.shared.CreateDeterministicHash(text)
+	features := s.shared.GenerateTextFeatures(text)
+
+	// Fill first section with hash features (0-95)
+	for i := 0; i < 96 && i < len(embedding); i++ {
+		byteIdx := i % 32
+		embedding[i] = float32(hash[byteIdx])/255.0*2.0 - 1.0
+	}
+
+	// Fill second section with attack analysis (96-191)
+	if len(embedding) > 96 {
+		embedding[96] = analysis.Confidence
+		if analysis.IsAttack {
+			embedding[97] = 1.0
+		}
+		embedding[98] = float32(len(analysis.MatchedPatterns)) / 10.0
+
+		// Add category scores
+		idx := 99
+		for _, score := range analysis.Categories {
+			if idx >= 192 {
+				break
+			}
+			embedding[idx] = score
+			idx++
+		}
+	}
+
+	// Fill third section with text features (192-287)
+	if len(embedding) > 192 {
+		startIdx := 192
+		embedding[startIdx] = float32(features.Length) / 1000.0
+		embedding[startIdx+1] = float32(features.WordCount) / 100.0
+		embedding[startIdx+2] = features.AvgWordLength / 20.0
+		embedding[startIdx+3] = features.SpecialCharRatio
+		embedding[startIdx+4] = features.CapitalizationRatio
+		embedding[startIdx+5] = features.Entropy
+		embedding[startIdx+6] = features.RepetitionScore
+	}
+
+	// Normalize the embedding
+	return s.shared.NormalizeEmbedding(embedding)
+}
+
+// Helper function to create int pointer
+func intPtr(i int) *int {
+	return &i
 }
