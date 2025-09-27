@@ -9,7 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/raaihank/llm-sentinel/internal/websocket"
+	"internal/security"
+	"github.com/raihan.k/Workspace/Personal/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -174,9 +175,19 @@ func (s *Server) vectorSecurityMiddleware(next http.Handler) http.Handler {
 
 		// If we found a prompt, analyze it
 		if prompt != "" {
-			result, err := s.vectorSecurity.AnalyzePrompt(r.Context(), prompt)
-			if err != nil {
-				logger.Error("Vector security analysis failed", zap.Error(err))
+			var result *security.SecurityResult
+			for attempt := 0; attempt < 3; attempt++ {
+				var err error
+				result, err = s.vectorSecurity.AnalyzePrompt(r.Context(), prompt)
+				if err == nil {
+					break
+				}
+				logger.Warn("Vector analysis attempt failed", zap.Int("attempt", attempt), zap.Error(err))
+				time.Sleep(100 * time.Millisecond) // Backoff
+			}
+			if result == nil {
+				logger.Error("All vector analysis attempts failed, passing through")
+				// Proceed without blocking
 			} else {
 				// Log the analysis result
 				logger.Info("Vector security analysis completed",

@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+	"encoding/base64"
 )
 
 const (
@@ -38,6 +40,8 @@ type HubConfig struct {
 	BroadcastVectorSecurity bool
 	BroadcastSystem         bool
 	BroadcastConnections    bool
+	WebSocketUsername       string
+	WebSocketPassword       string
 }
 
 // Hub maintains the set of active clients and broadcasts messages to the clients
@@ -304,6 +308,22 @@ func (h *Hub) shouldBroadcastEvent(eventType EventType) bool {
 
 // HandleWebSocket handles WebSocket connections
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	typ, data, err := parseBasicAuth(auth)
+	if err != nil || typ != "Basic" {
+		http.Error(w, "Invalid auth", http.StatusUnauthorized)
+		return
+	}
+	user, pass, ok := parseCredentials(data)
+	if !ok || user != h.config.WebSocketUsername || pass != h.config.WebSocketPassword {
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("Failed to upgrade WebSocket connection",
@@ -467,4 +487,24 @@ func getClientIP(r *http.Request) string {
 
 	// Fall back to RemoteAddr
 	return r.RemoteAddr
+}
+
+func parseBasicAuth(auth string) (typ string, data string, err error) {
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid auth format")
+	}
+	return parts[0], parts[1], nil
+}
+
+func parseCredentials(data string) (string, string, bool) {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", "", false
+	}
+	parts := strings.SplitN(string(decoded), ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }

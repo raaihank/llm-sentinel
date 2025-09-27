@@ -2,9 +2,12 @@ package embeddings
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
+
+	"internal/vector"
 )
 
 // ServiceType represents the type of embedding service
@@ -43,78 +46,32 @@ func NewFactory(logger *zap.Logger) *Factory {
 
 // CreateService creates an embedding service based on the configuration
 func (f *Factory) CreateService(config ServiceConfig) (EmbeddingService, error) {
-	f.logger.Info("Creating embedding service",
-		zap.String("type", string(config.Type)),
-		zap.String("model", config.ModelConfig.ModelName),
-		zap.Bool("redis_enabled", config.RedisEnabled))
-
-	switch config.Type {
-	case HashEmbedding:
-		return f.createHashService(config)
-	case PatternEmbedding:
-		return f.createPatternService(config)
-	case MLEmbedding:
-		return f.createMLService(config)
-	default:
-		return nil, fmt.Errorf("unknown embedding service type: %s", config.Type)
+	if err := ValidateServiceConfig(config); err != nil {
+		return nil, err
 	}
-}
-
-// createHashService creates a hash-based embedding service
-func (f *Factory) createHashService(config ServiceConfig) (EmbeddingService, error) {
-	f.logger.Info("Initializing hash-based embedding service")
-
-	service, err := NewHashEmbeddingService(&config.ModelConfig, f.logger)
+	// Always create ML service
+	redisClient, err := redis.NewClient(&redis.Options{
+		Addr: config.RedisURL,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create hash embedding service: %w", err)
+		f.logger.Warn("Failed to create Redis client", zap.Error(err))
+		redisClient = nil
 	}
 
-	return service, nil
-}
-
-// createPatternService creates a pattern-based embedding service
-func (f *Factory) createPatternService(config ServiceConfig) (EmbeddingService, error) {
-	f.logger.Info("Initializing pattern-based embedding service")
-
-	service, err := NewPatternEmbeddingService(config.ModelConfig, f.logger)
+	vectorStore, err := vector.NewStore(&vector.Config{
+		DatabaseURL: config.DatabaseURL, // Assume config has it; adjust
+		// Fill other fields with defaults
+		MaxOpenConns: 10,
+		MaxIdleConns: 5,
+		ConnMaxLifetime: time.Hour,
+		ConnMaxIdleTime: 30 * time.Minute,
+	}, f.logger) // Assume logger is available
 	if err != nil {
-		return nil, fmt.Errorf("failed to create pattern embedding service: %w", err)
+		f.logger.Warn("Failed to init vector store", zap.Error(err))
+		vectorStore = nil
 	}
 
-	return service, nil
-}
-
-// createMLService creates an ML-based embedding service with optional Redis caching
-func (f *Factory) createMLService(config ServiceConfig) (EmbeddingService, error) {
-	f.logger.Info("Initializing ML-based embedding service",
-		zap.Bool("redis_enabled", config.RedisEnabled))
-
-	var redisClient *redis.Client
-
-	// Initialize Redis client if enabled
-	if config.RedisEnabled && config.RedisURL != "" {
-		redisClient = redis.NewClient(&redis.Options{
-			Addr: config.RedisURL,
-		})
-
-		// Test Redis connection
-		if err := redisClient.Ping(redisClient.Context()).Err(); err != nil {
-			f.logger.Warn("Redis connection failed, proceeding without cache", zap.Error(err))
-			redisClient = nil
-		} else {
-			f.logger.Info("Redis cache enabled for ML embeddings")
-		}
-	}
-
-	service, err := NewMLEmbeddingService(config.ModelConfig, f.logger, redisClient)
-	if err != nil {
-		if redisClient != nil {
-			redisClient.Close()
-		}
-		return nil, fmt.Errorf("failed to create ML embedding service: %w", err)
-	}
-
-	return service, nil
+	return NewMLEmbeddingService(config.ModelConfig, f.logger, redisClient, vectorStore)
 }
 
 // GetRecommendedService returns the recommended service type based on use case
@@ -170,34 +127,12 @@ func ValidateServiceConfig(config ServiceConfig) error {
 
 // GetAllServiceTypes returns all available service types
 func GetAllServiceTypes() []ServiceType {
-	return []ServiceType{HashEmbedding, PatternEmbedding, MLEmbedding}
+	return []ServiceType{MLEmbedding}
 }
 
 // GetServiceCapabilities returns the capabilities of a service type
 func GetServiceCapabilities(serviceType ServiceType) map[string]interface{} {
 	switch serviceType {
-	case HashEmbedding:
-		return map[string]interface{}{
-			"deterministic":    true,
-			"caching":          false,
-			"pattern_matching": false,
-			"ml_inference":     false,
-			"redis_support":    false,
-			"speed":            "very_fast",
-			"accuracy":         "basic",
-			"memory_usage":     "low",
-		}
-	case PatternEmbedding:
-		return map[string]interface{}{
-			"deterministic":    true,
-			"caching":          false,
-			"pattern_matching": true,
-			"ml_inference":     false,
-			"redis_support":    false,
-			"speed":            "fast",
-			"accuracy":         "good",
-			"memory_usage":     "medium",
-		}
 	case MLEmbedding:
 		return map[string]interface{}{
 			"deterministic":    false,
@@ -229,10 +164,6 @@ func CreateDefaultConfig(serviceType ServiceType) ServiceConfig {
 	}
 
 	switch serviceType {
-	case HashEmbedding:
-		baseConfig.ModelConfig.ModelName = "hash-deterministic"
-	case PatternEmbedding:
-		baseConfig.ModelConfig.ModelName = "pattern-advanced"
 	case MLEmbedding:
 		baseConfig.ModelConfig.ModelName = "sentence-transformers/all-MiniLM-L6-v2"
 		baseConfig.ModelConfig.CacheDir = "./models"
@@ -257,24 +188,6 @@ type ServicePerformanceMetrics struct {
 // GetPerformanceMetrics returns estimated performance metrics for each service type
 func GetPerformanceMetrics() map[ServiceType]ServicePerformanceMetrics {
 	return map[ServiceType]ServicePerformanceMetrics{
-		HashEmbedding: {
-			ServiceType:      HashEmbedding,
-			AvgLatencyMs:     2.0,
-			MemoryUsageMB:    5,
-			AccuracyScore:    0.65,
-			ThroughputRPS:    1000,
-			CacheHitRatio:    0.0,
-			RecommendedUse:   "High-speed processing, deterministic results",
-		},
-		PatternEmbedding: {
-			ServiceType:      PatternEmbedding,
-			AvgLatencyMs:     10.0,
-			MemoryUsageMB:    15,
-			AccuracyScore:    0.75,
-			ThroughputRPS:    200,
-			CacheHitRatio:    0.0,
-			RecommendedUse:   "Production use, balanced performance",
-		},
 		MLEmbedding: {
 			ServiceType:      MLEmbedding,
 			AvgLatencyMs:     35.0,

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/raaihank/llm-sentinel/internal/config"
 	"github.com/raaihank/llm-sentinel/internal/embeddings"
 	"github.com/raaihank/llm-sentinel/internal/logger"

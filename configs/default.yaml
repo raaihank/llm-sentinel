@@ -32,31 +32,21 @@ security:
     burst_limit: 10
   vector_security:
     enabled: true
-    # service_type is defined under embedding.service_type
+    service_type: "ml"  # Options: "ml" (best), "pattern" (balanced), "hash" (fast)
     block_threshold: 0.70  # Block at 70% confidence
-    max_batch_size: 32
-    embedding:
-      service_type: "pattern"
-      redis_enabled: true   # Enable Redis caching for ML service
-      redis_url: "localhost:6379"
-      redis_db: 0
-      model:
-        model_name: "all-MiniLM-L6-v2"  # Pattern-based embeddings with contextual analysis
-        model_path: ""
-        tokenizer_path: ""
-        vocab_path: ""
-        cache_dir: "./models"
-        auto_download: true  # Enable for pattern embedding service
-        max_length: 512
-        batch_size: 16  # Smaller batch for pattern embedding
-        model_timeout: 30s
-        cache_ttl: 6h
-    database:
-      database_url: "postgres://sentinel:sentinel_pass@localhost:5432/llm_sentinel?sslmode=disable"
-      max_open_conns: 20
-      max_idle_conns: 10
-      conn_max_lifetime: 1h
-      conn_max_idle_time: 30m
+    cache_enabled: false  # Disable cache for now
+    redis_enabled: true   # Enable Redis caching for ML service
+    redis_url: "localhost:6379"
+    model:
+      model_name: "all-MiniLM-L6-v2"  # Pattern-based embeddings with contextual analysis
+      model_path: ""
+      tokenizer_path: ""
+      vocab_path: ""
+      cache_dir: "./models"
+      auto_download: true  # Enable for pattern embedding service
+      max_length: 512
+      batch_size: 16  # Smaller batch for pattern embedding
+      model_timeout: 30s
 
 upstream:
   openai: https://api.openai.com

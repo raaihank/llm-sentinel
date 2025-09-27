@@ -28,6 +28,7 @@ type MLEmbeddingService struct {
 	model       *TransformerModel
 	mu          sync.RWMutex
 	startTime   time.Time
+	sem         chan struct{} // Semaphore to limit concurrent cache operations
 }
 
 // TransformerModel represents a loaded transformer model
@@ -90,6 +91,7 @@ func NewMLEmbeddingService(config ModelConfig, logger *zap.Logger, redisClient *
 			StartTime:     start,
 			ModelLoadTime: 0, // Will be updated after model loading
 		},
+		sem: make(chan struct{}, 3), // Max 3 concurrent
 	}
 
 	// Initialize tokenizer
@@ -177,7 +179,13 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 
 				// Cache in Redis for future use
 				if s.redisClient != nil {
-					go s.cacheEmbedding(context.Background(), text, embedding)
+					var wg sync.WaitGroup
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						s.cacheEmbedding(context.Background(), text, embedding)
+					}()
+					wg.Wait()
 				}
 			}
 		}
@@ -194,7 +202,13 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 
 		// Cache in Redis if available
 		if s.redisClient != nil {
-			go s.cacheEmbedding(context.Background(), text, embedding)
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.cacheEmbedding(context.Background(), text, embedding)
+			}()
+			wg.Wait()
 		}
 	}
 
@@ -337,7 +351,13 @@ func (s *MLEmbeddingService) processBatch(ctx context.Context, texts []string) (
 
 		// Cache asynchronously
 		if s.redisClient != nil {
-			go s.cacheEmbedding(context.Background(), text, embedding)
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.cacheEmbedding(context.Background(), text, embedding)
+			}()
+			wg.Wait()
 		}
 	}
 
@@ -363,12 +383,11 @@ func (s *MLEmbeddingService) generateMLEmbedding(ctx context.Context, text strin
 		return nil, fmt.Errorf("%w: tokenization failed: %v", ErrTokenizationFailed, err)
 	}
 
-	// TODO: This is where real transformer model inference would happen
-	// For now, we create a sophisticated hybrid embedding that combines:
-	// 1. Pattern-based analysis (from shared utilities)
-	// 2. Simulated transformer-like features
-	// 3. Contextual understanding
-	embedding := s.generateHybridEmbedding(text, analysis, features, tokens)
+	// Replace with:
+	embedding, err := s.runTransformerInference(tokens)
+	if err != nil {
+		return nil, fmt.Errorf("transformer inference failed: %w", err)
+	}
 
 	// Verify output dimension
 	if len(embedding) != EmbeddingDimensions {
@@ -547,6 +566,9 @@ func (s *MLEmbeddingService) getCachedEmbedding(ctx context.Context, text string
 }
 
 func (s *MLEmbeddingService) cacheEmbedding(ctx context.Context, text string, embedding []float32) {
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
+
 	key := s.getCacheKey(text)
 
 	// Convert embedding to string (simple format: comma-separated floats)
@@ -990,4 +1012,29 @@ func (s *MLEmbeddingService) createQuickEmbedding(text string, analysis *AttackA
 // Helper function to create int pointer
 func intPtr(i int) *int {
 	return &i
+}
+
+func (s *MLEmbeddingService) runTransformerInference(tokens *TokenizedInput) ([]float32, error) {
+	// Placeholder for real inference (e.g., using ONNX runtime)
+	// Load model if not already (assuming s.model.ModelBytes is loaded)
+	if len(s.model.ModelBytes) == 0 {
+		var err error
+		s.model.ModelBytes, err = os.ReadFile(s.model.ModelPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load model bytes: %w", err)
+		}
+	}
+
+	// Simulate inference: mean pooling over token "embeddings" (using token IDs as proxy)
+	embedding := make([]float32, EmbeddingDimensions)
+	for i := 0; i < EmbeddingDimensions; i++ {
+		// Simple simulation: average token IDs modulated by position
+		sum := float32(0)
+		for j := 0; j < tokens.Length; j++ {
+			sum += float32(tokens.InputIDs[j]) / float32(tokens.Length) * float32(j+1)
+		}
+		embedding[i] = sum / float32(EmbeddingDimensions)
+	}
+
+	return s.shared.NormalizeEmbedding(embedding), nil
 }

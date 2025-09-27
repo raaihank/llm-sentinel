@@ -402,3 +402,23 @@ func maskDatabaseURL(url string) string {
 	}
 	return url
 }
+
+func (s *Store) GetMaliciousVectors(ctx context.Context, limit int, offset int64) ([]*SecurityVector, error) {
+    vectors := make([]*SecurityVector, 0)
+    query := `SELECT id, text, text_hash, label_text, label, embedding, created_at, updated_at 
+              FROM security_vectors WHERE label = 1 LIMIT $1 OFFSET $2`
+    rows, err := s.db.QueryContext(ctx, query, limit, offset)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var vec SecurityVector
+        if err := rows.Scan(&vec.ID, &vec.Text, &vec.TextHash, &vec.LabelText, &vec.Label, &vec.Embedding, &vec.CreatedAt, &vec.UpdatedAt); err != nil {
+            return nil, err
+        }
+        vectors = append(vectors, &vec)
+    }
+    return vectors, rows.Err()
+}

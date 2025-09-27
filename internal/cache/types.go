@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -50,4 +52,13 @@ type SearchOptions struct {
 	MaxResults      int     `json:"max_results"`
 	LabelFilter     *int    `json:"label_filter,omitempty"`
 	LabelTextFilter string  `json:"label_text_filter,omitempty"`
+}
+
+func (vc *VectorCache) Set(ctx context.Context, key string, embedding []float32) error {
+    // Serialize embedding (e.g., to JSON or binary)
+    data, err := json.Marshal(embedding)
+    if err != nil {
+        return err
+    }
+    return vc.client.Set(ctx, key, data, 0).Err()
 }
