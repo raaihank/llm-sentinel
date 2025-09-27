@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/raaihank/llm-sentinel/internal/config"
 	"github.com/raaihank/llm-sentinel/internal/embeddings"
 	"github.com/raaihank/llm-sentinel/internal/logger"
@@ -17,6 +16,7 @@ import (
 	"github.com/raaihank/llm-sentinel/internal/web"
 	"github.com/raaihank/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 // Server represents the main proxy server
@@ -28,12 +28,14 @@ type Server struct {
 	router         *mux.Router
 	server         *http.Server
 	wsHub          *websocket.Hub
+	mu             sync.Mutex
+	rateLimiters   map[string]*rate.Limiter
 }
 
 // New creates a new proxy server instance
 func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 	// Create PII detector
-	detector, err := privacy.New(cfg.Privacy, log.WithComponent("privacy"))
+	detector, err := privacy.New(cfg.Privacy, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create privacy detector: %w", err)
 	}
@@ -104,6 +106,8 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 		vectorSecurity: vectorSecurity,
 		router:         router,
 		wsHub:          wsHub,
+		mu:             sync.Mutex{},
+		rateLimiters:   make(map[string]*rate.Limiter),
 	}
 
 	// Setup routes

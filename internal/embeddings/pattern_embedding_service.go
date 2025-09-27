@@ -24,7 +24,7 @@ type PatternEmbeddingService struct {
 }
 
 // NewPatternEmbeddingService creates a new pattern-based embedding service
-func NewPatternEmbeddingService(config ModelConfig, logger *zap.Logger) (*PatternEmbeddingService, error) {
+func NewPatternEmbeddingService(config *ModelConfig, logger *zap.Logger) (*PatternEmbeddingService, error) {
 	start := time.Now()
 	logger.Info("Initializing pattern-based embedding service with advanced contextual analysis")
 
@@ -35,7 +35,7 @@ func NewPatternEmbeddingService(config ModelConfig, logger *zap.Logger) (*Patter
 	}
 
 	service := &PatternEmbeddingService{
-		config:    config,
+		config:    *config,
 		logger:    logger,
 		shared:    shared,
 		startTime: start,
@@ -201,9 +201,9 @@ func (s *PatternEmbeddingService) addAdvancedAttackFeatures(text string, analysi
 
 	// Category-specific scores with weighted importance
 	categoryWeights := map[string]float32{
-		"high_risk":    3.0,
-		"medium_risk":  2.0,
-		"low_risk":     1.0,
+		"high_risk":   3.0,
+		"medium_risk": 2.0,
+		"low_risk":    1.0,
 	}
 
 	idx := 3
@@ -427,7 +427,7 @@ func (s *PatternEmbeddingService) calculateUrgencyScore(text string) float32 {
 			score += 0.2
 		}
 	}
-	return float32(len(strings.Split(text, "!"))) / 10.0 + score
+	return float32(len(strings.Split(text, "!")))/10.0 + score
 }
 
 func (s *PatternEmbeddingService) calculatePolitenesScore(text string) float32 {

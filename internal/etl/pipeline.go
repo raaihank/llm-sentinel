@@ -54,6 +54,9 @@ func NewPipeline(
 
 // ProcessFile processes a dataset file (CSV, Parquet, or JSON)
 func (p *Pipeline) ProcessFile(ctx context.Context, filePath string) (*ProcessingResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	p.logger.Info("Starting ETL pipeline",
 		zap.String("file", filePath),
 		zap.Int("batch_size", p.config.BatchSize),
@@ -319,15 +322,15 @@ func (p *Pipeline) processBatch(ctx context.Context, batch []*DataRecord, result
 	}
 
 	// Create security vectors
-    vectors := make([]*vector.SecurityVector, len(batch))
+	vectors := make([]*vector.SecurityVector, len(batch))
 	for i, record := range batch {
 		vectors[i] = &vector.SecurityVector{
-			Text:      record.Text,
-            EmbeddingType: embeddingResult.ServiceType,
-			TextHash:  computeTextHash(record.Text),
-			LabelText: record.LabelText,
-			Label:     record.Label,
-			Embedding: embeddingResult.Embeddings[i],
+			Text:          record.Text,
+			EmbeddingType: embeddingResult.ServiceType,
+			TextHash:      computeTextHash(record.Text),
+			LabelText:     record.LabelText,
+			Label:         record.Label,
+			Embedding:     embeddingResult.Embeddings[i],
 		}
 	}
 

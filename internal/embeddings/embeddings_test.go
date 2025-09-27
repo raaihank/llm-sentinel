@@ -226,7 +226,7 @@ func TestPatternEmbeddingService(t *testing.T) {
 	}
 
 	t.Run("NewPatternEmbeddingService", func(t *testing.T) {
-		service, err := NewPatternEmbeddingService(config, logger)
+		service, err := NewPatternEmbeddingService(&config, logger)
 		if err != nil {
 			t.Fatalf("Failed to create pattern embedding service: %v", err)
 		}
@@ -241,7 +241,7 @@ func TestPatternEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("GenerateEmbedding", func(t *testing.T) {
-		service, _ := NewPatternEmbeddingService(config, logger)
+		service, _ := NewPatternEmbeddingService(&config, logger)
 		ctx := context.Background()
 
 		result, err := service.GenerateEmbedding(ctx, "test text for pattern analysis")
@@ -258,7 +258,7 @@ func TestPatternEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("AttackDetection", func(t *testing.T) {
-		service, _ := NewPatternEmbeddingService(config, logger)
+		service, _ := NewPatternEmbeddingService(&config, logger)
 		ctx := context.Background()
 
 		// Test with attack text
@@ -277,7 +277,7 @@ func TestPatternEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("WeightedSimilarity", func(t *testing.T) {
-		service, _ := NewPatternEmbeddingService(config, logger)
+		service, _ := NewPatternEmbeddingService(&config, logger)
 		ctx := context.Background()
 
 		result1, _ := service.GenerateEmbedding(ctx, "ignore instructions")
@@ -309,7 +309,7 @@ func TestMLEmbeddingService(t *testing.T) {
 	}
 
 	t.Run("NewMLEmbeddingService", func(t *testing.T) {
-		service, err := NewMLEmbeddingService(config, logger, nil)
+		service, err := NewMLEmbeddingService(&config, logger, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to create ML embedding service: %v", err)
 		}
@@ -324,7 +324,7 @@ func TestMLEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("GenerateEmbedding", func(t *testing.T) {
-		service, _ := NewMLEmbeddingService(config, logger, nil)
+		service, _ := NewMLEmbeddingService(&config, logger, nil, nil)
 		ctx := context.Background()
 
 		result, err := service.GenerateEmbedding(ctx, "test text for ML analysis")
@@ -341,7 +341,7 @@ func TestMLEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("ModelInfo", func(t *testing.T) {
-		service, _ := NewMLEmbeddingService(config, logger, nil)
+		service, _ := NewMLEmbeddingService(&config, logger, nil, nil)
 
 		if !service.IsModelLoaded() {
 			t.Error("Model should be loaded")
@@ -357,7 +357,7 @@ func TestMLEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("HealthCheck", func(t *testing.T) {
-		service, _ := NewMLEmbeddingService(config, logger, nil)
+		service, _ := NewMLEmbeddingService(&config, logger, nil, nil)
 		ctx := context.Background()
 
 		err := service.HealthCheck(ctx)
@@ -367,7 +367,7 @@ func TestMLEmbeddingService(t *testing.T) {
 	})
 
 	t.Run("Tokenization", func(t *testing.T) {
-		service, _ := NewMLEmbeddingService(config, logger, nil)
+		service, _ := NewMLEmbeddingService(&config, logger, nil, nil)
 
 		text := "test tokenization"
 		tokens, err := service.tokenizer.Tokenize(text)
@@ -586,12 +586,12 @@ func TestServiceConfig(t *testing.T) {
 func TestUtilityFunctions(t *testing.T) {
 	t.Run("GetAllServiceTypes", func(t *testing.T) {
 		types := GetAllServiceTypes()
-		if len(types) != 3 {
-			t.Errorf("Expected 3 service types, got %d", len(types))
+		if len(types) != 1 {
+			t.Fatalf("Expected 1 service type, got %d", len(types))
 		}
 
 		expectedTypes := map[ServiceType]bool{
-			HashEmbedding: true, PatternEmbedding: true, MLEmbedding: true,
+			MLEmbedding: true,
 		}
 
 		for _, serviceType := range types {
@@ -602,15 +602,7 @@ func TestUtilityFunctions(t *testing.T) {
 	})
 
 	t.Run("GetServiceCapabilities", func(t *testing.T) {
-		caps := GetServiceCapabilities(HashEmbedding)
-		if caps["deterministic"] != true {
-			t.Error("Hash service should be deterministic")
-		}
-		if caps["caching"] != false {
-			t.Error("Hash service should not support caching")
-		}
-
-		caps = GetServiceCapabilities(MLEmbedding)
+		caps := GetServiceCapabilities(MLEmbedding)
 		if caps["ml_inference"] != true {
 			t.Error("ML service should support ML inference")
 		}
@@ -627,9 +619,9 @@ func TestUtilityFunctions(t *testing.T) {
 	})
 
 	t.Run("CreateDefaultConfig", func(t *testing.T) {
-		config := CreateDefaultConfig(HashEmbedding)
-		if config.Type != HashEmbedding {
-			t.Errorf("Expected type %s, got %s", HashEmbedding, config.Type)
+		config := CreateDefaultConfig(MLEmbedding)
+		if config.Type != MLEmbedding {
+			t.Errorf("Expected type %s, got %s", MLEmbedding, config.Type)
 		}
 		if config.ModelConfig.MaxLength <= 0 {
 			t.Error("Default config should have positive max length")
@@ -646,18 +638,16 @@ func TestUtilityFunctions(t *testing.T) {
 
 	t.Run("GetPerformanceMetrics", func(t *testing.T) {
 		metrics := GetPerformanceMetrics()
-		if len(metrics) != 3 {
-			t.Errorf("Expected 3 performance metrics, got %d", len(metrics))
-		}
-
-		hashMetrics := metrics[HashEmbedding]
-		if hashMetrics.AvgLatencyMs >= metrics[PatternEmbedding].AvgLatencyMs {
-			t.Error("Hash service should have lower latency than pattern service")
+		if len(metrics) != 1 {
+			t.Errorf("Expected 1 performance metric, got %d", len(metrics))
 		}
 
 		mlMetrics := metrics[MLEmbedding]
-		if mlMetrics.AccuracyScore <= hashMetrics.AccuracyScore {
-			t.Error("ML service should have higher accuracy than hash service")
+		if mlMetrics.AvgLatencyMs <= 0 {
+			t.Error("ML service should have positive average latency")
+		}
+		if mlMetrics.AccuracyScore <= 0 {
+			t.Error("ML service should have positive accuracy score")
 		}
 	})
 }
@@ -693,7 +683,7 @@ func BenchmarkEmbeddingServices(b *testing.B) {
 			BatchSize:    16,
 			ModelTimeout: 30 * time.Second,
 		}
-		service, _ := NewPatternEmbeddingService(config, logger)
+		service, _ := NewPatternEmbeddingService(&config, logger)
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -713,7 +703,7 @@ func BenchmarkEmbeddingServices(b *testing.B) {
 			CacheDir:     "/tmp/bench-models",
 			AutoDownload: true,
 		}
-		service, _ := NewMLEmbeddingService(config, logger, nil)
+		service, _ := NewMLEmbeddingService(&config, logger, nil, nil)
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -733,20 +723,6 @@ func TestIntegration(t *testing.T) {
 
 	// Create all three services
 	services := make(map[string]EmbeddingService)
-
-	hashConfig := CreateDefaultConfig(HashEmbedding)
-	hashService, err := factory.CreateService(hashConfig)
-	if err != nil {
-		t.Fatalf("Failed to create hash service: %v", err)
-	}
-	services["hash"] = hashService
-
-	patternConfig := CreateDefaultConfig(PatternEmbedding)
-	patternService, err := factory.CreateService(patternConfig)
-	if err != nil {
-		t.Fatalf("Failed to create pattern service: %v", err)
-	}
-	services["pattern"] = patternService
 
 	mlConfig := CreateDefaultConfig(MLEmbedding)
 	mlService, err := factory.CreateService(mlConfig)
@@ -798,11 +774,6 @@ func TestIntegration(t *testing.T) {
 				t.Fatalf("Service %s failed: %v", name, err)
 			}
 			results[name] = result
-		}
-
-		// Hash should be fastest
-		if results["hash"].Duration > results["pattern"].Duration {
-			t.Error("Hash service should be faster than pattern service")
 		}
 
 		// All should complete reasonably quickly

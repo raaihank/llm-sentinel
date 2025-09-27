@@ -183,6 +183,7 @@ func initializeServices(cfg *config.Config, log *logger.Logger) (*services, erro
 		return nil, fmt.Errorf("failed to initialize embedding service: %w", err)
 	}
 	services.embeddingService = embeddingService
+	log.Info("Using embedding service type", zap.String("type", cfg.Security.VectorSecurity.Embedding.ServiceType))
 
 	// Vector caching is now handled by the embedding service itself
 
@@ -210,10 +211,18 @@ func processDataset(ctx context.Context, services *services, etlConfig *etl.Conf
 		log.Logger,
 	)
 
-	// Process the file
-	result, err := pipeline.ProcessFile(ctx, inputFile)
+	var result *etl.ProcessingResult
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		result, err = pipeline.ProcessFile(ctx, inputFile)
+		if err == nil {
+			break
+		}
+		log.Warn("ETL attempt failed", zap.Int("attempt", attempt), zap.Error(err))
+		time.Sleep(time.Second * time.Duration(attempt+1))
+	}
 	if err != nil {
-		return fmt.Errorf("pipeline processing failed: %w", err)
+		return fmt.Errorf("all ETL attempts failed: %w", err)
 	}
 
 	// Report results

@@ -28,7 +28,7 @@ func New(cfg config.PrivacyConfig, log *logger.Logger) (*Detector, error) {
 
 	// Configure enabled detectors
 	if err := detector.configureDetectors(cfg.Detectors); err != nil {
-		return nil, fmt.Errorf("failed to configure detectors: %w", err)
+		return nil, err
 	}
 
 	log.Info("Privacy detector initialized",

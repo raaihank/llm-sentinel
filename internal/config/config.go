@@ -3,12 +3,10 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
-	"internal/privacy"
 )
 
 // Load loads configuration from file and environment variables
@@ -158,31 +156,15 @@ func validateConfig(config *Config) error {
 		}
 	}
 
-	// Privacy detectors validation
-	for _, detector := range config.Privacy.Detectors {
-		if detector != "all" {
-			found := false
-			for _, rule := range privacy.GetDefaultRules() {
-				if rule.Name == detector {
-					if _, err := regexp.Compile(rule.Pattern.String()); err != nil {
-						return fmt.Errorf("invalid regex for detector %s: %w", detector, err)
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("unknown detector: %s", detector)
-			}
-		}
-	}
-
 	// Upstream URLs validation
-	for name, urlStr := range config.Upstream {
-		u, err := url.Parse(urlStr)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("invalid upstream URL for %s: %s", name, urlStr)
-		}
+	if err := validateURL(config.Upstream.OpenAI, "openai"); err != nil {
+		return err
+	}
+	if err := validateURL(config.Upstream.Anthropic, "anthropic"); err != nil {
+		return err
+	}
+	if err := validateURL(config.Upstream.Ollama, "ollama"); err != nil {
+		return err
 	}
 
 	return nil
@@ -206,5 +188,13 @@ func Watch(config *Config, callback func(*Config)) error {
 		callback(newConfig)
 	})
 
+	return nil
+}
+
+func validateURL(urlStr string, name string) error {
+	u, err := url.Parse(urlStr)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("invalid upstream URL for %s: %s", name, urlStr)
+	}
 	return nil
 }

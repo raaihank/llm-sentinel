@@ -1,13 +1,13 @@
 package embeddings
 
 import (
+	"context"
 	"fmt"
-	"time"
 
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
 
-	"internal/vector"
+	"github.com/raaihank/llm-sentinel/internal/vector"
 )
 
 // ServiceType represents the type of embedding service
@@ -49,29 +49,40 @@ func (f *Factory) CreateService(config ServiceConfig) (EmbeddingService, error) 
 	if err := ValidateServiceConfig(config); err != nil {
 		return nil, err
 	}
-	// Always create ML service
-	redisClient, err := redis.NewClient(&redis.Options{
-		Addr: config.RedisURL,
-	})
-	if err != nil {
-		f.logger.Warn("Failed to create Redis client", zap.Error(err))
-		redisClient = nil
+	switch config.Type {
+	case HashEmbedding:
+		service, err := NewHashEmbeddingService(&config.ModelConfig, f.logger)
+		if err != nil {
+			return nil, err
+		}
+		f.logger.Info("Created hash embedding service")
+		return service, nil
+	case PatternEmbedding:
+		service, err := NewPatternEmbeddingService(&config.ModelConfig, f.logger)
+		if err != nil {
+			return nil, err
+		}
+		f.logger.Info("Created pattern embedding service")
+		return service, nil
+	case MLEmbedding:
+		var redisClient *redis.Client
+		if config.RedisEnabled {
+			redisClient = redis.NewClient(&redis.Options{Addr: config.RedisURL})
+			if err := redisClient.Ping(context.Background()).Err(); err != nil {
+				f.logger.Warn("Redis connection failed, disabling cache", zap.Error(err))
+				redisClient = nil
+			}
+		}
+		var vectorStore *vector.Store = nil
+		service, err := NewMLEmbeddingService(&config.ModelConfig, f.logger, redisClient, vectorStore)
+		if err != nil {
+			return nil, err
+		}
+		f.logger.Info("Created ML embedding service")
+		return service, nil
+	default:
+		return nil, fmt.Errorf("unknown embedding service type: %s", config.Type)
 	}
-
-	vectorStore, err := vector.NewStore(&vector.Config{
-		DatabaseURL: config.DatabaseURL, // Assume config has it; adjust
-		// Fill other fields with defaults
-		MaxOpenConns: 10,
-		MaxIdleConns: 5,
-		ConnMaxLifetime: time.Hour,
-		ConnMaxIdleTime: 30 * time.Minute,
-	}, f.logger) // Assume logger is available
-	if err != nil {
-		f.logger.Warn("Failed to init vector store", zap.Error(err))
-		vectorStore = nil
-	}
-
-	return NewMLEmbeddingService(config.ModelConfig, f.logger, redisClient, vectorStore)
 }
 
 // GetRecommendedService returns the recommended service type based on use case
@@ -176,26 +187,26 @@ func CreateDefaultConfig(serviceType ServiceType) ServiceConfig {
 
 // ServicePerformanceMetrics contains performance metrics for different service types
 type ServicePerformanceMetrics struct {
-	ServiceType      ServiceType `json:"service_type"`
-	AvgLatencyMs     float64     `json:"avg_latency_ms"`
-	MemoryUsageMB    int         `json:"memory_usage_mb"`
-	AccuracyScore    float64     `json:"accuracy_score"`
-	ThroughputRPS    int         `json:"throughput_rps"`
-	CacheHitRatio    float64     `json:"cache_hit_ratio"`
-	RecommendedUse   string      `json:"recommended_use"`
+	ServiceType    ServiceType `json:"service_type"`
+	AvgLatencyMs   float64     `json:"avg_latency_ms"`
+	MemoryUsageMB  int         `json:"memory_usage_mb"`
+	AccuracyScore  float64     `json:"accuracy_score"`
+	ThroughputRPS  int         `json:"throughput_rps"`
+	CacheHitRatio  float64     `json:"cache_hit_ratio"`
+	RecommendedUse string      `json:"recommended_use"`
 }
 
 // GetPerformanceMetrics returns estimated performance metrics for each service type
 func GetPerformanceMetrics() map[ServiceType]ServicePerformanceMetrics {
 	return map[ServiceType]ServicePerformanceMetrics{
 		MLEmbedding: {
-			ServiceType:      MLEmbedding,
-			AvgLatencyMs:     35.0,
-			MemoryUsageMB:    80,
-			AccuracyScore:    0.85,
-			ThroughputRPS:    50,
-			CacheHitRatio:    0.70,
-			RecommendedUse:   "Maximum accuracy, when caching is beneficial",
+			ServiceType:    MLEmbedding,
+			AvgLatencyMs:   35.0,
+			MemoryUsageMB:  80,
+			AccuracyScore:  0.85,
+			ThroughputRPS:  50,
+			CacheHitRatio:  0.70,
+			RecommendedUse: "Maximum accuracy, when caching is beneficial",
 		},
 	}
 }

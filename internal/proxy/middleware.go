@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"time"
 
-	"internal/security"
-	"github.com/raihan.k/Workspace/Personal/llm-sentinel/internal/websocket"
+	"golang.org/x/time/rate"
+
+	"github.com/raaihank/llm-sentinel/internal/security"
+	"github.com/raaihank/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
 )
 
@@ -242,6 +244,25 @@ func (s *Server) vectorSecurityMiddleware(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+// rateLimiterMiddleware applies rate limiting to requests
+func (s *Server) rateLimiterMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := getClientIP(r)
+		s.mu.Lock()
+		limiter, ok := s.rateLimiters[ip]
+		if !ok {
+			limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(s.config.Security.RateLimit.RequestsPerMin)), s.config.Security.RateLimit.BurstLimit)
+			s.rateLimiters[ip] = limiter
+		}
+		s.mu.Unlock()
+		if !limiter.Allow() {
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

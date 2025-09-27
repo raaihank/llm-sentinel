@@ -2,6 +2,7 @@ package embeddings
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -45,9 +46,9 @@ func NewHashEmbeddingService(config *ModelConfig, logger *zap.Logger) (*HashEmbe
 		shared:    shared,
 		startTime: start,
 		stats: &ModelStats{
-			ServiceType:     "hash",
-			StartTime:       start,
-			ModelLoadTime:   time.Since(start),
+			ServiceType:   "hash",
+			StartTime:     start,
+			ModelLoadTime: time.Since(start),
 		},
 	}
 
@@ -165,7 +166,7 @@ func (s *HashEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, text
 // generateDeterministicEmbedding creates a sophisticated deterministic embedding
 func (s *HashEmbeddingService) generateDeterministicEmbedding(text string, analysis *AttackAnalysisResult, features *TextFeatures) []float32 {
 	// Create deterministic hash
-	hash := s.shared.CreateDeterministicHash(text)
+	hash := sha256.Sum256([]byte(text))
 
 	// Initialize embedding with deterministic base
 	embedding := make([]float32, EmbeddingDimensions)
@@ -223,7 +224,7 @@ func (s *HashEmbeddingService) addAttackFeatures(analysis *AttackAnalysisResult,
 
 	// Category-specific scores
 	categoryIdx := 3
-	for _,  score := range analysis.Categories {
+	for _, score := range analysis.Categories {
 		if categoryIdx >= len(target) {
 			break
 		}

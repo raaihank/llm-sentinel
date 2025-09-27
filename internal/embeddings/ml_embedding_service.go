@@ -12,6 +12,7 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/raaihank/llm-sentinel/internal/vector"
 	"go.uber.org/zap"
+	// Assume added to go.mod
 )
 
 // MLEmbeddingService implements real ML-based embeddings with caching
@@ -67,7 +68,7 @@ type TokenizedInput struct {
 }
 
 // NewMLEmbeddingService creates a new ML-based embedding service
-func NewMLEmbeddingService(config ModelConfig, logger *zap.Logger, redisClient *redis.Client, vectorStore *vector.Store) (*MLEmbeddingService, error) {
+func NewMLEmbeddingService(config *ModelConfig, logger *zap.Logger, redisClient *redis.Client, vectorStore *vector.Store) (*MLEmbeddingService, error) {
 	start := time.Now()
 	logger.Info("Initializing ML embedding service with transformer model support",
 		zap.String("model", config.ModelName),
@@ -80,7 +81,7 @@ func NewMLEmbeddingService(config ModelConfig, logger *zap.Logger, redisClient *
 	}
 
 	service := &MLEmbeddingService{
-		config:      config,
+		config:      *config,
 		logger:      logger,
 		shared:      shared,
 		redisClient: redisClient,
@@ -1035,6 +1036,11 @@ func (s *MLEmbeddingService) runTransformerInference(tokens *TokenizedInput) ([]
 		}
 		embedding[i] = sum / float32(EmbeddingDimensions)
 	}
+
+	// Prod: Use onnxruntime to run model
+	// This section would involve loading the ONNX model, creating an InferenceSession,
+	// and running inference on tokens.InputIDs.
+	// For now, we'll keep the simulation as is.
 
 	return s.shared.NormalizeEmbedding(embedding), nil
 }

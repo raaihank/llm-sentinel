@@ -11,7 +11,7 @@ security:
   vector_security:
     enabled: true
     # service_type is defined under embedding.service_type
-    block_threshold: 0.70
+    block_threshold: 0.7
     max_batch_size: 32
     embedding:
       service_type: "ml"
