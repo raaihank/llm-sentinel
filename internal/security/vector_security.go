@@ -121,22 +121,22 @@ func (vse *VectorSecurityEngine) AnalyzePrompt(ctx context.Context, prompt strin
 		}, nil
 	}
 
-    // Use the most similar vector
+	// Use the most similar vector
 	best := similarVectors[0]
 
-    // Enforce embedding type compatibility when available
-    if best.Vector != nil && best.Vector.EmbeddingType != "" {
-        expected := "pattern"
-        if vse.config != nil {
-            expected = vse.config.Embedding.ServiceType
-        }
-        if best.Vector.EmbeddingType != expected {
-            vse.logger.Warn("Embedding type mismatch; treating as safe",
-                zap.String("db_type", best.Vector.EmbeddingType),
-                zap.String("expected", expected))
-            return &SecurityResult{IsMalicious: false, Confidence: 0.0, AttackType: "safe", ProcessingTime: time.Since(start)}, nil
-        }
-    }
+	// Enforce embedding type compatibility when available
+	if best.Vector != nil && best.Vector.EmbeddingType != "" {
+		expected := "pattern"
+		if vse.config != nil {
+			expected = vse.config.Embedding.ServiceType
+		}
+		if best.Vector.EmbeddingType != expected {
+			vse.logger.Warn("Embedding type mismatch; treating as safe",
+				zap.String("db_type", best.Vector.EmbeddingType),
+				zap.String("expected", expected))
+			return &SecurityResult{IsMalicious: false, Confidence: 0.0, AttackType: "safe", ProcessingTime: time.Since(start)}, nil
+		}
+	}
 
 	result := &SecurityResult{
 		IsMalicious:     best.Vector.Label == 1,

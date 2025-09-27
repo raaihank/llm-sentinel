@@ -1,4 +1,4 @@
-.PHONY: build test clean docker run dev lint benchmark install
+.PHONY: build test clean docker run dev lint benchmark install format tidy deps publish help
 
 # Build variables
 BINARY_NAME=sentinel
@@ -87,8 +87,8 @@ install:
 # Run linter
 lint:
 	@echo "Running linter..."
-	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest" && exit 1)
-	golangci-lint run
+	if ! command -v golangci-lint > /dev/null; then go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest; fi
+	$(shell go env GOPATH)/bin/golangci-lint run --fix
 
 # Run benchmarks
 benchmark:

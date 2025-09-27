@@ -9,12 +9,16 @@ import (
 	"net/http"
 	"time"
 
-	"golang.org/x/time/rate"
-
 	"github.com/raaihank/llm-sentinel/internal/security"
 	"github.com/raaihank/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
 )
+
+type contextKey string
+
+const requestIDKey = contextKey("request_id")
+const originalHeadersKey = contextKey("original_headers")
+const privacyFindingsKey = contextKey("privacy_findings")
 
 // loggingMiddleware logs HTTP requests and responses
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
@@ -23,7 +27,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 
 		// Generate request ID
 		requestID := generateRequestID()
-		ctx := context.WithValue(r.Context(), "request_id", requestID)
+		ctx := context.WithValue(r.Context(), requestIDKey, requestID)
 		r = r.WithContext(ctx)
 
 		// Create response writer wrapper to capture response data
@@ -70,7 +74,7 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 			originalHeaders[key] = make([]string, len(values))
 			copy(originalHeaders[key], values)
 		}
-		ctx := context.WithValue(r.Context(), "original_headers", originalHeaders)
+		ctx := context.WithValue(r.Context(), originalHeadersKey, originalHeaders)
 		r = r.WithContext(ctx)
 
 		// Read request body
@@ -126,7 +130,7 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 		r.ContentLength = int64(len(result.MaskedText))
 
 		// Store findings in context for metrics/dashboard
-		ctx = context.WithValue(ctx, "privacy_findings", result.Findings)
+		ctx = context.WithValue(ctx, privacyFindingsKey, result.Findings)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -248,25 +252,6 @@ func (s *Server) vectorSecurityMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// rateLimiterMiddleware applies rate limiting to requests
-func (s *Server) rateLimiterMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := getClientIP(r)
-		s.mu.Lock()
-		limiter, ok := s.rateLimiters[ip]
-		if !ok {
-			limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(s.config.Security.RateLimit.RequestsPerMin)), s.config.Security.RateLimit.BurstLimit)
-			s.rateLimiters[ip] = limiter
-		}
-		s.mu.Unlock()
-		if !limiter.Allow() {
-			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // getClientIP extracts the client IP from the request
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header
@@ -309,7 +294,7 @@ func generateRequestID() string {
 
 // getRequestID extracts request ID from context
 func getRequestID(ctx context.Context) string {
-	if requestID, ok := ctx.Value("request_id").(string); ok {
+	if requestID, ok := ctx.Value(requestIDKey).(string); ok {
 		return requestID
 	}
 	return "unknown"

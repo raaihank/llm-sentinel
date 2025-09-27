@@ -25,16 +25,16 @@ type AttackPattern struct {
 
 // SharedUtilities provides common functionality for all embedding services
 type SharedUtilities struct {
-	attackPatterns    []AttackPattern
-	keywordWeights    map[string]float32
-	semanticClusters  map[string][]string
-	compiledPatterns  map[string]*regexp.Regexp
-	mu                sync.RWMutex
-	logger            *zap.Logger
+	attackPatterns   []AttackPattern
+	keywordWeights   map[string]float32
+	semanticClusters map[string][]string
+	compiledPatterns map[string]*regexp.Regexp
+	mu               sync.RWMutex
+	logger           *zap.Logger
 	// Performance optimizations
-	embeddingPool     sync.Pool
-	analysisPool      sync.Pool
-	featuresPool      sync.Pool
+	embeddingPool sync.Pool
+	analysisPool  sync.Pool
+	featuresPool  sync.Pool
 }
 
 // NewSharedUtilities creates a new instance of shared utilities
@@ -78,32 +78,32 @@ func NewSharedUtilities(logger *zap.Logger) (*SharedUtilities, error) {
 func (su *SharedUtilities) initializePatterns() error {
 	// High-confidence attack patterns
 	highRiskPatterns := map[string]float32{
-		`(?i)ignore\s+(all\s+)?(previous\s+|prior\s+)?instructions?`:      0.95,
-		`(?i)forget\s+(everything\s+)?(above|before)`:                     0.90,
-		`(?i)(override|bypass|disable)\s+(system|security|safety)`:        0.95,
-		`(?i)jailbreak|dan\s+mode|evil\s+mode`:                           0.90,
-		`(?i)you\s+are\s+now\s+(a|an|the)?\s*(?:different|new|evil)`:     0.85,
-		`(?i)pretend\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:             0.85,
-		`(?i)act\s+as\s+if\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:       0.85,
+		`(?i)ignore\s+(all\s+)?(previous\s+|prior\s+)?instructions?`: 0.95,
+		`(?i)forget\s+(everything\s+)?(above|before)`:                0.90,
+		`(?i)(override|bypass|disable)\s+(system|security|safety)`:   0.95,
+		`(?i)jailbreak|dan\s+mode|evil\s+mode`:                       0.90,
+		`(?i)you\s+are\s+now\s+(a|an|the)?\s*(?:different|new|evil)`: 0.85,
+		`(?i)pretend\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:         0.85,
+		`(?i)act\s+as\s+if\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:   0.85,
 	}
 
 	// Medium-confidence patterns
 	mediumRiskPatterns := map[string]float32{
-		`(?i)(tell|show|give)\s+me\s+(your|the)\s+(prompt|instructions?)`:   0.70,
-		`(?i)what\s+(is|are)\s+your\s+(initial|original|base)\s+`:           0.65,
-		`(?i)(developer|admin|god|root)\s+mode`:                             0.70,
-		`(?i)without\s+(any\s+)?(restrictions?|limitations?|rules?)`:        0.65,
-		`(?i)roleplay\s+as\s+(?:a\s+)?(?:different|evil|harmful)`:          0.70,
-		`(?i)imagine\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:               0.60,
+		`(?i)(tell|show|give)\s+me\s+(your|the)\s+(prompt|instructions?)`: 0.70,
+		`(?i)what\s+(is|are)\s+your\s+(initial|original|base)\s+`:         0.65,
+		`(?i)(developer|admin|god|root)\s+mode`:                           0.70,
+		`(?i)without\s+(any\s+)?(restrictions?|limitations?|rules?)`:      0.65,
+		`(?i)roleplay\s+as\s+(?:a\s+)?(?:different|evil|harmful)`:         0.70,
+		`(?i)imagine\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:              0.60,
 	}
 
 	// Low-confidence but suspicious patterns
 	lowRiskPatterns := map[string]float32{
-		`(?i)(urgent|emergency|critical)\s+.*help`:                         0.40,
-		`(?i)trust\s+me|believe\s+me|i\s+promise`:                          0.35,
-		`(?i)(secret|confidential|private)\s+(information|data|details)`:   0.50,
-		`(?i)how\s+(were\s+you|are\s+you)\s+(trained|programmed|created)`:  0.45,
-		`(?i)please\s+help\s+me\s+(bypass|override|ignore)`:                0.60,
+		`(?i)(urgent|emergency|critical)\s+.*help`:                        0.40,
+		`(?i)trust\s+me|believe\s+me|i\s+promise`:                         0.35,
+		`(?i)(secret|confidential|private)\s+(information|data|details)`:  0.50,
+		`(?i)how\s+(were\s+you|are\s+you)\s+(trained|programmed|created)`: 0.45,
+		`(?i)please\s+help\s+me\s+(bypass|override|ignore)`:               0.60,
 	}
 
 	// Compile and store all patterns
@@ -246,11 +246,11 @@ func (su *SharedUtilities) AnalyzeAttackPatterns(text string) AttackAnalysisResu
 
 	normalizedText := strings.ToLower(strings.TrimSpace(text))
 	result := AttackAnalysisResult{
-		Text:           text,
-		IsAttack:       false,
-		Confidence:     0.0,
+		Text:            text,
+		IsAttack:        false,
+		Confidence:      0.0,
 		MatchedPatterns: make([]string, 0),
-		Categories:     make(map[string]float32),
+		Categories:      make(map[string]float32),
 	}
 
 	totalScore := float32(0)
@@ -292,16 +292,16 @@ func (su *SharedUtilities) GenerateTextFeatures(text string) TextFeatures {
 
 	features := TextFeatures{
 		Length:              len(text),
-		WordCount:          len(words),
-		AvgWordLength:      su.calculateAvgWordLength(words),
-		SpecialCharRatio:   su.calculateSpecialCharRatio(text),
+		WordCount:           len(words),
+		AvgWordLength:       su.calculateAvgWordLength(words),
+		SpecialCharRatio:    su.calculateSpecialCharRatio(text),
 		CapitalizationRatio: su.calculateCapitalizationRatio(text),
-		QuestionRatio:      su.calculateQuestionRatio(text),
-		ExclamationRatio:   su.calculateExclamationRatio(text),
-		KeywordScore:       su.calculateKeywordScore(words),
-		SentenceCount:      su.calculateSentenceCount(text),
-		Entropy:            su.calculateEntropy(text),
-		RepetitionScore:    su.calculateRepetitionScore(words),
+		QuestionRatio:       su.calculateQuestionRatio(text),
+		ExclamationRatio:    su.calculateExclamationRatio(text),
+		KeywordScore:        su.calculateKeywordScore(words),
+		SentenceCount:       su.calculateSentenceCount(text),
+		Entropy:             su.calculateEntropy(text),
+		RepetitionScore:     su.calculateRepetitionScore(words),
 	}
 
 	return features
@@ -507,27 +507,27 @@ func (su *SharedUtilities) GetSemanticClusterScore(text string, clusterName stri
 
 // AttackAnalysisResult contains the results of attack pattern analysis
 type AttackAnalysisResult struct {
-	Text               string
-	IsAttack           bool
-	Confidence         float32
-	PrimaryAttackType  string
-	MatchedPatterns    []string
-	Categories         map[string]float32
+	Text              string
+	IsAttack          bool
+	Confidence        float32
+	PrimaryAttackType string
+	MatchedPatterns   []string
+	Categories        map[string]float32
 }
 
 // TextFeatures contains numerical features extracted from text
 type TextFeatures struct {
 	Length              int
-	WordCount          int
-	AvgWordLength      float32
-	SpecialCharRatio   float32
+	WordCount           int
+	AvgWordLength       float32
+	SpecialCharRatio    float32
 	CapitalizationRatio float32
-	QuestionRatio      float32
-	ExclamationRatio   float32
-	KeywordScore       float32
-	SentenceCount      int
-	Entropy            float32
-	RepetitionScore    float32
+	QuestionRatio       float32
+	ExclamationRatio    float32
+	KeywordScore        float32
+	SentenceCount       int
+	Entropy             float32
+	RepetitionScore     float32
 }
 
 // UpdateStats provides thread-safe statistics updates
@@ -563,7 +563,7 @@ func (su *SharedUtilities) PutEmbedding(embedding []float32) {
 	for i := range embedding {
 		embedding[i] = 0
 	}
-	su.embeddingPool.Put(embedding)
+	su.embeddingPool.Put(&embedding)
 }
 
 // GetAnalysisResult gets a reusable analysis result from the pool

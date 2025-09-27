@@ -71,7 +71,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer log.Sync()
+	defer func() {
+		if err := log.Sync(); err != nil {
+			fmt.Fprintf(os.Stderr, "Log sync failed: %v\n", err)
+		}
+	}()
 
 	log.Info("Starting LLM-Sentinel",
 		zap.String("version", version),

@@ -55,10 +55,10 @@ type SearchOptions struct {
 }
 
 func (vc *VectorCache) Set(ctx context.Context, key string, embedding []float32) error {
-    // Serialize embedding (e.g., to JSON or binary)
-    data, err := json.Marshal(embedding)
-    if err != nil {
-        return err
-    }
-    return vc.client.Set(ctx, key, data, 0).Err()
+	// Serialize embedding (e.g., to JSON or binary)
+	data, err := json.Marshal(embedding)
+	if err != nil {
+		return err
+	}
+	return vc.client.Set(ctx, key, data, 0).Err()
 }

@@ -143,6 +143,7 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 	var cacheHit bool
 
 	if s.redisClient != nil {
+		s.logger.Debug("Checking cache")
 		if cachedResult, err := s.getCachedEmbedding(ctx, text); err == nil {
 			cached = cachedResult
 			cacheHit = true
@@ -331,6 +332,7 @@ func (s *MLEmbeddingService) processBatch(ctx context.Context, texts []string) (
 
 		// Check cache first
 		if s.redisClient != nil {
+			s.logger.Debug("Checking cache")
 			if cached, err := s.getCachedEmbedding(ctx, text); err == nil {
 				embeddings[i] = cached
 				cacheHits++
@@ -396,146 +398,6 @@ func (s *MLEmbeddingService) generateMLEmbedding(ctx context.Context, text strin
 	}
 
 	return embedding, nil
-}
-
-// generateHybridEmbedding creates a sophisticated hybrid embedding
-// This serves as a foundation that can be extended with real ML models
-func (s *MLEmbeddingService) generateHybridEmbedding(text string, analysis *AttackAnalysisResult, features *TextFeatures, tokens *TokenizedInput) []float32 {
-	embedding := make([]float32, EmbeddingDimensions)
-
-	// Layer 1: Hash-based features (0-63)
-	hash := s.shared.CreateDeterministicHash(text)
-	s.addHashFeatures(hash, embedding[0:64])
-
-	// Layer 2: Advanced pattern analysis (64-127)
-	s.addPatternFeatures(analysis, embedding[64:128])
-
-	// Layer 3: Text characteristics (128-191)
-	s.addTextFeatures(features, embedding[128:192])
-
-	// Layer 4: Tokenization features (192-255)
-	s.addTokenizationFeatures(tokens, embedding[192:256])
-
-	// Layer 5: Semantic clusters (256-319)
-	s.addSemanticFeatures(text, embedding[256:320])
-
-	// Layer 6: Transformer-like features (320-383)
-	// This is where real transformer embeddings would be integrated
-	s.addTransformerLikeFeatures(text, tokens, embedding[320:384])
-
-	// Normalize the final embedding
-	return s.shared.NormalizeEmbedding(embedding)
-}
-
-// Feature extraction methods
-
-func (s *MLEmbeddingService) addHashFeatures(hash [32]byte, target []float32) {
-	for i := 0; i < len(target); i++ {
-		byteIdx := i % 32
-		target[i] = float32(hash[byteIdx])/255.0*2.0 - 1.0
-	}
-}
-
-func (s *MLEmbeddingService) addPatternFeatures(analysis *AttackAnalysisResult, target []float32) {
-	target[0] = analysis.Confidence
-	if analysis.IsAttack {
-		target[1] = 1.0
-	}
-	target[2] = float32(len(analysis.MatchedPatterns)) / 10.0
-
-	// Encode categories
-	idx := 3
-	for _, score := range analysis.Categories {
-		if idx >= len(target) {
-			break
-		}
-		target[idx] = score
-		idx++
-	}
-}
-
-func (s *MLEmbeddingService) addTextFeatures(features *TextFeatures, target []float32) {
-	target[0] = float32(features.Length) / 1000.0
-	target[1] = float32(features.WordCount) / 100.0
-	target[2] = features.AvgWordLength / 20.0
-	target[3] = features.SpecialCharRatio
-	target[4] = features.CapitalizationRatio
-	target[5] = features.QuestionRatio
-	target[6] = features.ExclamationRatio
-	target[7] = features.Entropy
-	target[8] = features.RepetitionScore
-	target[9] = features.KeywordScore / 10.0
-}
-
-func (s *MLEmbeddingService) addTokenizationFeatures(tokens *TokenizedInput, target []float32) {
-	if tokens == nil {
-		return
-	}
-
-	target[0] = float32(tokens.Length) / float32(s.tokenizer.MaxLength)
-	if tokens.Truncated {
-		target[1] = 1.0
-	}
-
-	// Token type diversity
-	uniqueTokens := make(map[int32]bool)
-	for i := 0; i < tokens.Length; i++ {
-		uniqueTokens[tokens.InputIDs[i]] = true
-	}
-	target[2] = float32(len(uniqueTokens)) / float32(tokens.Length)
-
-	// Special token ratio
-	specialCount := 0
-	for i := 0; i < tokens.Length; i++ {
-		if tokens.InputIDs[i] < 1000 { // Assume special tokens have low IDs
-			specialCount++
-		}
-	}
-	target[3] = float32(specialCount) / float32(tokens.Length)
-}
-
-func (s *MLEmbeddingService) addSemanticFeatures(text string, target []float32) {
-	clusterNames := []string{
-		"instruction_manipulation", "roleplay_attempts", "system_probing",
-		"jailbreak_terms", "social_engineering", "data_extraction", "authority_bypass",
-	}
-
-	for i, clusterName := range clusterNames {
-		if i >= len(target) {
-			break
-		}
-		score := s.shared.GetSemanticClusterScore(text, clusterName)
-		target[i] = score
-	}
-}
-
-func (s *MLEmbeddingService) addTransformerLikeFeatures(text string, tokens *TokenizedInput, target []float32) {
-	// This is where actual transformer features would be extracted
-	// For now, we simulate sophisticated contextual understanding
-
-	words := strings.Fields(strings.ToLower(text))
-	if len(words) == 0 {
-		return
-	}
-
-	// Simulate attention-like features
-	for i := 0; i < len(target) && i < len(words); i++ {
-		word := words[i]
-		// Simulate word importance based on position and content
-		positionWeight := 1.0 - float32(i)/float32(len(words))
-		contentWeight := float32(len(word)) / 20.0
-		target[i] = positionWeight * contentWeight
-	}
-
-	// Simulate contextual relationships
-	for i := len(words); i < len(target)-10; i++ {
-		if i < len(words)-1 {
-			// Simulate word pair relationships
-			word1Len := len(words[i%len(words)])
-			word2Len := len(words[(i+1)%len(words)])
-			target[i] = float32(word1Len*word2Len) / 400.0 // Normalize
-		}
-	}
 }
 
 // Redis caching methods
@@ -785,13 +647,11 @@ func (s *MLEmbeddingService) GetStats() *ModelStats {
 // Close cleans up resources
 func (s *MLEmbeddingService) Close() error {
 	s.logger.Info("Closing ML embedding service")
-
 	if s.redisClient != nil {
 		if err := s.redisClient.Close(); err != nil {
-			s.logger.Error("Failed to close Redis client", zap.Error(err))
+			s.logger.Error("Failed to close Redis", zap.Error(err))
 		}
 	}
-
 	return nil
 }
 
@@ -832,8 +692,7 @@ func (s *MLEmbeddingService) updateStats(requests int64, tokens int, duration ti
 
 	// Update cache hit ratio (if using Redis)
 	if s.redisClient != nil {
-		// This would be calculated based on cache hits vs misses
-		// For now, we'll leave it as is
+		s.stats.CacheHitRatio = 0.0 // Placeholder; calculate properly in prod
 	}
 }
 

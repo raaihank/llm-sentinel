@@ -6,15 +6,15 @@ import (
 
 // SecurityVector represents a security pattern with its embedding
 type SecurityVector struct {
-	ID        int64     `db:"id" json:"id"`
-	Text      string    `db:"text" json:"text"`
-    EmbeddingType string `db:"embedding_type" json:"embedding_type"`
-	TextHash  string    `db:"text_hash" json:"text_hash"`
-	LabelText string    `db:"label_text" json:"label_text"`
-	Label     int       `db:"label" json:"label"`
-	Embedding []float32 `db:"embedding" json:"embedding"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	ID            int64     `db:"id" json:"id"`
+	Text          string    `db:"text" json:"text"`
+	EmbeddingType string    `db:"embedding_type" json:"embedding_type"`
+	TextHash      string    `db:"text_hash" json:"text_hash"`
+	LabelText     string    `db:"label_text" json:"label_text"`
+	Label         int       `db:"label" json:"label"`
+	Embedding     []float32 `db:"embedding" json:"embedding"`
+	CreatedAt     time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // SimilarityResult represents a vector similarity search result

@@ -8,9 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"encoding/base64"
+
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
-	"encoding/base64"
 )
 
 const (
@@ -364,9 +365,13 @@ func (h *Hub) handleClientWrite(client *Client) {
 		select {
 		case event, channelOk := <-client.Send:
 			if conn, ok := client.Conn.(*websocket.Conn); ok {
-				conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+					h.logger.Error("SetWriteDeadline failed", zap.Error(err))
+				}
 				if !channelOk {
-					conn.WriteMessage(websocket.CloseMessage, []byte{})
+					if err := conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+						h.logger.Error("WriteMessage failed", zap.Error(err))
+					}
 					return
 				}
 
@@ -382,7 +387,9 @@ func (h *Hub) handleClientWrite(client *Client) {
 
 		case <-ticker.C:
 			if conn, ok := client.Conn.(*websocket.Conn); ok {
-				conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+					h.logger.Error("SetWriteDeadline failed", zap.Error(err))
+				}
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
@@ -402,10 +409,14 @@ func (h *Hub) handleClientRead(client *Client) {
 
 	if conn, ok := client.Conn.(*websocket.Conn); ok {
 		conn.SetReadLimit(maxMessageSize)
-		conn.SetReadDeadline(time.Now().Add(pongWait))
+		if err := conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			h.logger.Error("SetReadDeadline failed", zap.Error(err))
+		}
 		conn.SetPongHandler(func(string) error {
 			client.LastPing = time.Now()
-			conn.SetReadDeadline(time.Now().Add(pongWait))
+			if err := conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+				h.logger.Error("SetReadDeadline failed", zap.Error(err))
+			}
 			return nil
 		})
 

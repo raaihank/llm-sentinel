@@ -53,17 +53,17 @@ type RateLimitConfig struct {
 
 // VectorSecurityConfig contains vector-based security configuration
 type VectorSecurityConfig struct {
-	Enabled        bool                 `yaml:"enabled" mapstructure:"enabled"`
-	ServiceType    string               `yaml:"service_type" mapstructure:"service_type"` // "ml", "pattern", "hash"
-	BlockThreshold float32              `yaml:"block_threshold" mapstructure:"block_threshold"`
-	MaxBatchSize   int                  `yaml:"max_batch_size" mapstructure:"max_batch_size"`
-	Embedding      EmbeddingConfig      `yaml:"embedding" mapstructure:"embedding"`
-	Database       DatabaseConfig       `yaml:"database" mapstructure:"database"`
+	Enabled        bool            `yaml:"enabled" mapstructure:"enabled"`
+	ServiceType    string          `yaml:"service_type" mapstructure:"service_type"` // "ml", "pattern", "hash"
+	BlockThreshold float32         `yaml:"block_threshold" mapstructure:"block_threshold"`
+	MaxBatchSize   int             `yaml:"max_batch_size" mapstructure:"max_batch_size"`
+	Embedding      EmbeddingConfig `yaml:"embedding" mapstructure:"embedding"`
+	Database       DatabaseConfig  `yaml:"database" mapstructure:"database"`
 }
 
 // EmbeddingConfig contains embedding service configuration
 type EmbeddingConfig struct {
-	ServiceType  string      `yaml:"service_type" mapstructure:"service_type"`   // "ml", "pattern", "hash"
+	ServiceType  string      `yaml:"service_type" mapstructure:"service_type"` // "ml", "pattern", "hash"
 	Model        ModelConfig `yaml:"model" mapstructure:"model"`
 	RedisEnabled bool        `yaml:"redis_enabled" mapstructure:"redis_enabled"`
 	RedisURL     string      `yaml:"redis_url" mapstructure:"redis_url"`
@@ -91,7 +91,6 @@ type DatabaseConfig struct {
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" mapstructure:"conn_max_lifetime"`
 	ConnMaxIdleTime time.Duration `yaml:"conn_max_idle_time" mapstructure:"conn_max_idle_time"`
 }
-
 
 // LoggingConfig contains logging configuration
 type LoggingConfig struct {
