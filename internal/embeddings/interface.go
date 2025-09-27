@@ -13,5 +13,7 @@ type EmbeddingService interface {
 	Close() error
 }
 
-// Ensure SimpleService implements the interface
-var _ EmbeddingService = (*SimpleService)(nil)
+// Ensure all embedding services implement the interface
+var _ EmbeddingService = (*HashEmbeddingService)(nil)
+var _ EmbeddingService = (*PatternEmbeddingService)(nil)
+var _ EmbeddingService = (*MLEmbeddingService)(nil)
