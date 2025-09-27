@@ -85,6 +85,10 @@ PLAN.md
 TESTING.md
 TESTING.md
 logs/
-balanced_sample.csv
+*.csv
+!sample_security_dataset.csv
 venv/
 dist/
+etl
+sentinel
+models/

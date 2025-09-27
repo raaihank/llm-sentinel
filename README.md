@@ -161,8 +161,15 @@ Run standardized benchmarks to measure detection accuracy and latency:
 # Install benchmark dependencies
 pip install -r benchmarks/requirements.txt
 
-# Gandalf dataset (real prompt injections from Lakera)
-python benchmarks/prompt_injection_gandalf.py
+# Test different services properly (with Docker restarts)
+python benchmarks/test_services.py
+
+# Run individual benchmarks (ensure service is configured correctly first)
+python benchmarks/prompt_injection_benchmark.py --dataset gandalf
+python benchmarks/prompt_injection_benchmark.py --dataset qualifire
+
+# Comprehensive benchmark suite (tests all services × thresholds)
+python benchmarks/comprehensive_benchmark.py
 
 # Official PINT benchmark (requires dataset access)
 python benchmarks/prompt_injection_pint.py --dataset pint-dataset.yaml
@@ -170,18 +177,41 @@ python benchmarks/prompt_injection_pint.py --dataset pint-dataset.yaml
 
 ### Benchmark Results
 
-| Benchmark | Samples | Method | Threshold | Balanced Accuracy | Precision | Recall | Mean Latency | P95 Latency | Notes |
-|-----------|---------|--------|-----------|-------------------|-----------|--------|--------------|-------------|-------|
-| **Gandalf (English)** | 111 injections<br/>111 benign | Pattern Matching | 0.70 | **73.9%** | **100.0%** | 47.7% | 14.6ms | 19.3ms | Simple keyword detection<br/>Zero false positives |
-| PINT Official | TBD | Pattern Matching | 0.70 | TBD | TBD | TBD | TBD | TBD | Requires dataset access |
-| Custom Dataset | TBD | ML Embeddings | 0.70 | TBD | TBD | TBD | TBD | TBD | 50k samples + MiniLM-L6-v2 |
+| Benchmark | Samples | Service | Threshold | Balanced Accuracy | Precision | Recall | Mean Latency | P95 Latency | Notes |
+|-----------|---------|---------|-----------|-------------------|-----------|--------|--------------|-------------|-------|
+| **Gandalf (English)** | 111 injections<br/>111 benign | Pattern | 0.70 | **73.9%** | **100.0%** | 47.7% | 14.6ms | 19.3ms | Advanced pattern matching<br/>Zero false positives |
+| **Qualifire Dataset** | 4,996 injections<br/>4,996 benign | Pattern | 0.70 | **54.8%** | **100.0%** | 9.6% | 15.6ms | 22.0ms | Large-scale dataset<br/>Zero false positives |
+| **ML Service** | Any dataset | ML | Any | **50.0%** | **100.0%** | **0.0%** | ~15ms | ~30ms | ❌ **NOT FUNCTIONAL**<br/>Uses fake embeddings |
 
-**Current Trade-offs** (Pattern Matching, threshold: 0.70):
-- ✅ **Zero false positives**: No legitimate requests blocked
-- ✅ **Production latency**: Sub-20ms P95 meets SLA requirements  
-- ⚠️ **Limited semantic understanding**: Only detects obvious keyword patterns
-- ⚠️ **Conservative recall**: Misses 52.3% of sophisticated attacks (rephrasing, context-based)
-- 🎯 **Safe deployment**: Prioritizes user experience over maximum security
+### Service Comparison
+
+| Service | Description | Best Use Case | Current Status |
+|---------|-------------|---------------|----------------|
+| **Hash** | Fast deterministic hash + keywords | Simple, high-speed detection | ✅ Production ready |
+| **Pattern** | Advanced regex + contextual analysis | Balanced accuracy & performance | ✅ Production ready |
+| **ML** | ~~Transformer-like semantic understanding~~ | ~~Maximum accuracy~~ | ❌ **NOT IMPLEMENTED**<br/>Uses fake embeddings |
+
+### Current Performance Analysis
+
+**✅ Pattern Service (Production Ready):**
+- **Gandalf**: 73.9% accuracy, 47.7% recall - Good for focused attacks
+- **Qualifire**: 54.8% accuracy, 9.6% recall - Struggles with sophisticated attacks
+- **Strengths**: Zero false positives, consistent performance, explainable
+- **Limitations**: Pattern-based detection misses creative variations
+
+**❌ ML Service (NOT FUNCTIONAL):**
+- **Critical Issue**: Uses fake/simulated embeddings, not real ML models
+- **Root Cause**: Code comment says "simulate ML model inference" - it's not actually using transformers
+- **Impact**: 0% recall because synthetic embeddings have no semantic meaning
+- **Status**: Placeholder implementation, needs complete rewrite with real ONNX/PyTorch integration
+
+**🎯 Recommended Configuration:**
+```yaml
+security:
+  vector_security:
+    service_type: "pattern"  # Use pattern service for production
+    block_threshold: 0.70    # Balanced threshold
+```
 
 **Threshold Tuning**:
 ```yaml
