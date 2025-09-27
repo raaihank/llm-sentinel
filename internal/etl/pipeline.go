@@ -2,7 +2,9 @@ package etl
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -134,6 +136,7 @@ func (p *Pipeline) processCSV(ctx context.Context, filePath string, result *Proc
 	// Process records in batches
 	return p.processBatches(ctx, func() ([]*DataRecord, error) {
 		var batch []*DataRecord
+		p.logger.Debug("Starting to read batch")
 
 		for len(batch) < p.config.BatchSize {
 			record, err := reader.Read()
@@ -169,6 +172,7 @@ func (p *Pipeline) processCSV(ctx context.Context, filePath string, result *Proc
 			}
 		}
 
+		p.logger.Debug("Batch read completed", zap.Int("batch_size", len(batch)))
 		return batch, nil
 	}, result)
 }
@@ -244,6 +248,7 @@ func (p *Pipeline) processJSON(ctx context.Context, filePath string, result *Pro
 
 // processBatches processes data in batches using the provided reader function
 func (p *Pipeline) processBatches(ctx context.Context, readBatch func() ([]*DataRecord, error), result *ProcessingResult) error {
+	p.logger.Info("Starting processBatches loop")
 	for {
 		// Check context cancellation
 		select {
@@ -253,10 +258,12 @@ func (p *Pipeline) processBatches(ctx context.Context, readBatch func() ([]*Data
 		}
 
 		// Read next batch
+		p.logger.Info("Calling readBatch()")
 		batch, err := readBatch()
 		if err != nil {
 			return fmt.Errorf("failed to read batch: %w", err)
 		}
+		p.logger.Info("readBatch() completed", zap.Int("batch_size", len(batch)))
 
 		if len(batch) == 0 {
 			break // End of file
@@ -288,6 +295,8 @@ func (p *Pipeline) processBatch(ctx context.Context, batch []*DataRecord, result
 		return nil
 	}
 
+	p.logger.Info("Processing batch", zap.Int("batch_size", len(batch)))
+
 	// Extract texts for batch embedding generation
 	texts := make([]string, len(batch))
 	for i, record := range batch {
@@ -295,12 +304,14 @@ func (p *Pipeline) processBatch(ctx context.Context, batch []*DataRecord, result
 	}
 
 	// Generate embeddings for the batch
+	p.logger.Info("Starting embedding generation", zap.Int("text_count", len(texts)))
 	embeddingStart := time.Now()
 	embeddingResult, err := p.embeddingService.GenerateBatchEmbeddings(ctx, texts)
 	if err != nil {
 		return fmt.Errorf("batch embedding generation failed: %w", err)
 	}
 	result.EmbeddingTime += time.Since(embeddingStart)
+	p.logger.Info("Embedding generation completed", zap.Duration("duration", time.Since(embeddingStart)), zap.Int("embeddings_count", len(embeddingResult.Embeddings)))
 
 	if len(embeddingResult.Embeddings) != len(batch) {
 		return fmt.Errorf("embedding count mismatch: got %d, expected %d",
@@ -312,6 +323,7 @@ func (p *Pipeline) processBatch(ctx context.Context, batch []*DataRecord, result
 	for i, record := range batch {
 		vectors[i] = &vector.SecurityVector{
 			Text:      record.Text,
+			TextHash:  computeTextHash(record.Text),
 			LabelText: record.LabelText,
 			Label:     record.Label,
 			Embedding: embeddingResult.Embeddings[i],
@@ -319,12 +331,14 @@ func (p *Pipeline) processBatch(ctx context.Context, batch []*DataRecord, result
 	}
 
 	// Store in database
+	p.logger.Info("Starting database batch insert", zap.Int("vectors_count", len(vectors)))
 	dbStart := time.Now()
 	batchResult, err := p.vectorStore.BatchInsert(ctx, vectors)
 	if err != nil {
 		return fmt.Errorf("database batch insert failed: %w", err)
 	}
 	result.DatabaseTime += time.Since(dbStart)
+	p.logger.Info("Database batch insert completed", zap.Duration("duration", time.Since(dbStart)), zap.Int64("inserted", batchResult.Inserted))
 
 	// Update cache with high-confidence malicious vectors
 	if p.config.UpdateCache && p.vectorCache != nil {
@@ -438,4 +452,10 @@ func (p *Pipeline) GetStats() *ProcessingStats {
 	// Create a copy
 	stats := *p.stats
 	return &stats
+}
+
+// computeTextHash computes SHA-256 hash of the given text
+func computeTextHash(text string) string {
+	hash := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(hash[:])
 }

@@ -157,42 +157,34 @@ func initializeServices(cfg *config.Config, log *logger.Logger) (*services, erro
 	}
 	services.vectorStore = vectorStore
 
-	// Initialize embedding service (using simple service for now)
+	// Initialize embedding service using factory
 	log.Info("Initializing embedding service...")
-	embeddingService, err := embeddings.NewSimpleService(&embeddings.ModelConfig{
-		ModelName:     cfg.Security.VectorSecurity.Model.ModelName,
-		ModelPath:     cfg.Security.VectorSecurity.Model.ModelPath,
-		TokenizerPath: cfg.Security.VectorSecurity.Model.TokenizerPath,
-		VocabPath:     cfg.Security.VectorSecurity.Model.VocabPath,
-		CacheDir:      cfg.Security.VectorSecurity.Model.CacheDir,
-		AutoDownload:  cfg.Security.VectorSecurity.Model.AutoDownload,
-		MaxLength:     cfg.Security.VectorSecurity.Model.MaxLength,
-		BatchSize:     cfg.Security.VectorSecurity.Model.BatchSize,
-		ModelTimeout:  cfg.Security.VectorSecurity.Model.ModelTimeout,
-	}, log.Logger)
+	factory := embeddings.NewFactory(log.Logger)
+
+	serviceConfig := embeddings.ServiceConfig{
+		Type: embeddings.ServiceType(cfg.Security.VectorSecurity.Embedding.ServiceType),
+		ModelConfig: embeddings.ModelConfig{
+			ModelName:     cfg.Security.VectorSecurity.Embedding.Model.ModelName,
+			ModelPath:     cfg.Security.VectorSecurity.Embedding.Model.ModelPath,
+			TokenizerPath: cfg.Security.VectorSecurity.Embedding.Model.TokenizerPath,
+			VocabPath:     cfg.Security.VectorSecurity.Embedding.Model.VocabPath,
+			CacheDir:      cfg.Security.VectorSecurity.Embedding.Model.CacheDir,
+			AutoDownload:  cfg.Security.VectorSecurity.Embedding.Model.AutoDownload,
+			MaxLength:     cfg.Security.VectorSecurity.Embedding.Model.MaxLength,
+			BatchSize:     cfg.Security.VectorSecurity.Embedding.Model.BatchSize,
+			ModelTimeout:  cfg.Security.VectorSecurity.Embedding.Model.ModelTimeout,
+		},
+		RedisEnabled: cfg.Security.VectorSecurity.Embedding.RedisEnabled,
+		RedisURL:     cfg.Security.VectorSecurity.Embedding.RedisURL,
+	}
+
+	embeddingService, err := factory.CreateService(serviceConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize embedding service: %w", err)
 	}
 	services.embeddingService = embeddingService
 
-	// Initialize vector cache (optional)
-	if cfg.Security.VectorSecurity.CacheEnabled {
-		log.Info("Initializing vector cache...")
-		vectorCache, err := cache.NewVectorCache(&cache.Config{
-			RedisURL:        cfg.Security.VectorSecurity.Cache.RedisURL,
-			MaxConnections:  cfg.Security.VectorSecurity.Cache.MaxConnections,
-			MinIdleConns:    cfg.Security.VectorSecurity.Cache.MinIdleConns,
-			ConnMaxLifetime: cfg.Security.VectorSecurity.Cache.ConnMaxLifetime,
-			DefaultTTL:      cfg.Security.VectorSecurity.Cache.DefaultTTL,
-			MaxCacheSize:    cfg.Security.VectorSecurity.Cache.MaxCacheSize,
-			KeyPrefix:       cfg.Security.VectorSecurity.Cache.KeyPrefix,
-		}, log.Logger)
-		if err != nil {
-			log.Warn("Failed to initialize vector cache, continuing without cache", zap.Error(err))
-		} else {
-			services.vectorCache = vectorCache
-		}
-	}
+	// Vector caching is now handled by the embedding service itself
 
 	return services, nil
 }
