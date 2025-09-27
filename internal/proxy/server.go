@@ -41,14 +41,35 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 	if cfg.Security.VectorSecurity.Enabled {
 		// Create simple embedding service
 		embeddingModelConfig := embeddings.ModelConfig{
-			ModelName:    cfg.Security.VectorSecurity.Model.ModelName,
-			ModelPath:    cfg.Security.VectorSecurity.Model.ModelPath,
-			CacheDir:     cfg.Security.VectorSecurity.Model.CacheDir,
-			AutoDownload: cfg.Security.VectorSecurity.Model.AutoDownload,
-			MaxLength:    cfg.Security.VectorSecurity.Model.MaxLength,
-			BatchSize:    cfg.Security.VectorSecurity.Model.BatchSize,
+			ModelName:    cfg.Security.VectorSecurity.Embedding.Model.ModelName,
+			ModelPath:    cfg.Security.VectorSecurity.Embedding.Model.ModelPath,
+			CacheDir:     cfg.Security.VectorSecurity.Embedding.Model.CacheDir,
+			AutoDownload: cfg.Security.VectorSecurity.Embedding.Model.AutoDownload,
+			MaxLength:    cfg.Security.VectorSecurity.Embedding.Model.MaxLength,
+			BatchSize:    cfg.Security.VectorSecurity.Embedding.Model.BatchSize,
 		}
-		embeddingService, err := embeddings.NewSimpleService(&embeddingModelConfig, log.WithComponent("embeddings").Logger)
+		var embeddingService embeddings.EmbeddingService
+		var err error
+
+		// Create embedding service using factory
+		factory := embeddings.NewFactory(log.WithComponent("embeddings-factory").Logger)
+
+		serviceConfig := embeddings.ServiceConfig{
+			Type:         embeddings.ServiceType(cfg.Security.VectorSecurity.Embedding.ServiceType),
+			ModelConfig:  embeddingModelConfig,
+			RedisEnabled: cfg.Security.VectorSecurity.Embedding.RedisEnabled,
+			RedisURL:     cfg.Security.VectorSecurity.Embedding.RedisURL,
+		}
+
+		// Validate configuration
+		if err := embeddings.ValidateServiceConfig(serviceConfig); err != nil {
+			log.Error("Invalid embedding service configuration", zap.Error(err))
+			log.Info("Falling back to hash embedding service")
+			serviceConfig.Type = embeddings.HashEmbedding
+			serviceConfig.RedisEnabled = false
+		}
+
+		embeddingService, err = factory.CreateService(serviceConfig)
 		if err != nil {
 			log.Warn("Failed to create embedding service, vector security disabled", zap.Error(err))
 		} else {
