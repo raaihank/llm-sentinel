@@ -39,7 +39,7 @@ security:
     redis_url: "localhost:6379"
     model:
       model_name: "all-MiniLM-L6-v2"  # Pattern-based embeddings with contextual analysis
-      model_path: ""
+      model_path: "./models/model.onnx"
       tokenizer_path: ""
       vocab_path: ""
       cache_dir: "./models"

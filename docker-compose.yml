@@ -42,7 +42,9 @@ services:
 
   # LLM-Sentinel main application
   llm-sentinel:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: llm-sentinel
     depends_on:
       postgres:

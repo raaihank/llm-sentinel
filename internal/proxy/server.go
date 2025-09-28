@@ -13,6 +13,7 @@ import (
 	"github.com/raaihank/llm-sentinel/internal/logger"
 	"github.com/raaihank/llm-sentinel/internal/privacy"
 	"github.com/raaihank/llm-sentinel/internal/security"
+	"github.com/raaihank/llm-sentinel/internal/vector"
 	"github.com/raaihank/llm-sentinel/internal/web"
 	"github.com/raaihank/llm-sentinel/internal/websocket"
 	"go.uber.org/zap"
@@ -77,6 +78,24 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 		if err != nil {
 			log.Warn("Failed to create embedding service, vector security disabled", zap.Error(err))
 		} else {
+			// Attempt to initialize vector store and attach to ML embedding service
+			if mlService, ok := embeddingService.(*embeddings.MLEmbeddingService); ok {
+				dbCfg := &vector.Config{
+					DatabaseURL:     cfg.Security.VectorSecurity.Database.DatabaseURL,
+					MaxOpenConns:    cfg.Security.VectorSecurity.Database.MaxOpenConns,
+					MaxIdleConns:    cfg.Security.VectorSecurity.Database.MaxIdleConns,
+					ConnMaxLifetime: cfg.Security.VectorSecurity.Database.ConnMaxLifetime,
+					ConnMaxIdleTime: cfg.Security.VectorSecurity.Database.ConnMaxIdleTime,
+				}
+				store, sErr := vector.NewStore(dbCfg, log.WithComponent("vector-store").Logger)
+				if sErr != nil {
+					log.Warn("Vector store initialization failed; continuing without DB lookups", zap.Error(sErr))
+				} else {
+					mlService.SetVectorStore(store)
+					log.Info("Vector store attached to ML embedding service")
+				}
+			}
+
 			vectorSecurity = security.NewSimpleVectorSecurityEngine(
 				embeddingService,
 				&cfg.Security.VectorSecurity,

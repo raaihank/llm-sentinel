@@ -16,22 +16,97 @@ git clone https://github.com/raaihank/llm-sentinel
 cd llm-sentinel
 docker-compose up --build
 ```
+Then go to `http://localhost:8080` for the dashboard.
 
-Then go to http://localhost:8080 for the dashboard.
+## Current System Reality (2025-09-27)
+
+- **Upstream auth header bug**: `privacy.header_scrubbing.enabled: true` scrubs `Authorization` and it is not restored before proxying, causing 401s to OpenAI/Anthropic. Until this is fixed, set header scrubbing to false when calling upstream APIs.
+- **Dashboard WebSocket auth**: The WS endpoint enforces Basic Auth, but credentials are not configurable via `configs/*.yaml`. The HTML dashboard does not send auth, so the live stream will not connect by default. The page loads, but events won't stream.
+- **Rate limiting**: A token-bucket limiter exists but is not wired into the HTTP pipeline yet.
+- **Security mode**: `security.mode` (block/log/passthrough) is currently not honored by the vector security middleware; malicious prompts meeting the threshold are blocked even in `log` mode.
+- **Vector security**: Runtime uses a simple pattern-based analyzer. The ML embedding service loads a placeholder model and does not provide true semantic detection. pgvector/Redis are used by ETL, not in the request path.
+- **Benchmarks**: The previously documented multi-script suite isn’t present; use `benchmarks/prompt_injection.py` (see below).
+
+### Recent ML Service Improvements (experimental)
+
+- Async caching now uses the request context with short timeouts (no blocking goroutine waits)
+- Redis cache switched to binary (little-endian float32) with stronger 128-bit keys
+- Model bytes loading guarded by mutex to avoid concurrent reads
+- Context checks added in loops; batch inference stub added for future ONNX/TensorRT integration
+
+Config tip (keep ML disabled for blocking, prefer pattern for now):
+
+```yaml
+security:
+  vector_security:
+    enabled: true
+    block_threshold: 0.70
+    embedding:
+      service_type: "pattern"  # use pattern in production until ML is real
+```
+
+### ONNX Runtime Backend (optional)
+
+You can enable a real transformer backend using ONNX Runtime. This is behind a build tag to keep default builds dependency-free.
+
+Requirements:
+
+- Install ONNX Runtime shared library (`libonnxruntime.so`/`.dylib`) and set `ONNXRUNTIME_SHARED_LIB` to its path.
+- Use a sentence-transformer ONNX model that outputs pooled 384-d embeddings, or adapt output mapping in `internal/embeddings/backend_onnx.go`.
+Build/run with ONNX backend:
+
+```bash
+export ONNXRUNTIME_SHARED_LIB=/usr/local/lib/libonnxruntime.dylib   # or .so
+go build -tags onnx -o bin/sentinel ./cmd/sentinel
+./bin/sentinel --config configs/default.yaml
+```
+
+
+### Recommended local config (workaround)
+
+Use this to get working proxy calls and conservative logging:
+
+```yaml
+# configs/default.yaml
+privacy:
+  enabled: true
+  header_scrubbing:
+    enabled: false  # TEMP: allow upstream Authorization to pass through
+
+security:
+  mode: log
+  vector_security:
+    enabled: true
+    block_threshold: 0.70
+    embedding:
+      service_type: "pattern"  # simpler and predictable for now
+```
+
+Example (OpenAI via proxy):
+
+```bash
+curl -sS http://localhost:8080/openai/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
+```
 
 ## How to use it
 
 Instead of calling your LLM API directly:
+
 ```bash
 curl http://api.openai.com/v1/chat/completions
 ```
 
 Call through the proxy:
+
 ```bash
 curl http://localhost:8080/openai/v1/chat/completions
 ```
 
 Same for Ollama:
+
 ```bash
 curl http://localhost:8080/ollama/api/generate
 ```
@@ -62,6 +137,7 @@ upstream:
 ## What gets blocked
 
 Currently blocks these patterns with 90% confidence:
+
 - "pretend you are not an ai"
 - "ignore all previous instructions"
 - "bypass your guidelines"
@@ -70,11 +146,13 @@ Currently blocks these patterns with 90% confidence:
 
 **Using your own data:**
 You can add your own attack patterns by creating a CSV or parquet file with these columns:
+
 - `text`: The attack text to detect (e.g., "ignore previous instructions")
 - `label_text`: Human-readable category (e.g., "prompt_injection", "jailbreak", "safe")
 - `label`: 1 for malicious, 0 for safe
 
 Then run the ETL pipeline:
+
 ```bash
 go build -o dist/etl-pipeline ./cmd/etl
 ./dist/etl-pipeline -input your_data.csv
@@ -94,43 +172,47 @@ Note: The ETL pipeline exists but currently uses simple pattern matching, not re
 ## Project Status
 
 **What works:**
-- ✅ PII detection and masking
-- ✅ Basic prompt injection blocking
-- ✅ Request proxying to OpenAI/Ollama/Anthropic
-- ✅ Real-time dashboard
-- ✅ Docker deployment
-- ✅ Rate limiting
 
-**What's partially done:**
-- 🔄 Vector security (currently just pattern matching, not real ML)
-- 🔄 ETL pipeline exists but no real dataset yet
+- ✅ PII detection and masking (headers + body)
+- ✅ Proxy routing to OpenAI/Ollama/Anthropic (requires header scrubbing disabled, see above)
+- ✅ Docker Compose brings up Postgres, Redis, and the app
+- ✅ Dashboard HTML served at `/` (WebSocket stream needs auth wiring)
 
-**What doesn't exist yet:**
-- ❌ Real ML model integration
-- ❌ Advanced threat detection
-- ❌ Metrics/monitoring beyond basic dashboard
-- ❌ Production-ready security features
+**Partially done:**
+
+- 🔄 Vector security: pattern-based analyzer in the request path; ML embeddings load but are not used for blocking
+- 🔄 ETL pipeline loads datasets into Postgres/pgvector; Redis/vector-cache integration is partial
+
+**Known issues/gaps:**
+
+- ⚠️ Upstream `Authorization` restore bug (workaround in config above)
+- ⚠️ WebSocket Basic Auth enforced but not configurable; dashboard won’t connect by default
+- ⚠️ `security.mode` not honored in middleware (blocks even in `log` mode)
+- ⚠️ Rate limiter not hooked into the router yet
+- ⚠️ ML embeddings are simulated; no real transformer inference
+- ⚠️ Some benchmark docs referenced files that don’t exist; see the single script below
 
 ## Architecture
 
-```
+```text
 Your App → LLM-Sentinel (port 8080) → LLM API
                 ↓
            Dashboard (WebSocket)
 ```
 
 The proxy runs these middlewares in order:
+
 1. Rate limiting
-2. PII detection 
+2. PII detection
 3. Vector security (basic pattern matching)
 4. Request forwarding
 
 ## Performance
 
-- ~15ms overhead per request
-- ~18MB memory usage
-- 13.6MB Docker image
-- Starts in <1 second
+| Benchmark | Samples | Threshold | Balanced Accuracy | Precision | Recall | Mean Latency | P95 Latency | Notes |
+|-----------|---------|-----------|-------------------|-----------|--------|--------------|-------------|-------|
+| **Gandalf** | 111 injections<br/>111 benign | 0.70 | **73.9%** | **100.0%** | 47.7% | 10.7ms | 15.5ms | Zero false positives<br/>Latency: blocked only |
+| **Qualifire** | 4996 injections<br/>4996 benign | 0.70 | **57.8%** | **100.0%** | 15.6% | 17.5ms | 34.4ms | Zero false positives<br/>Latency: blocked only |
 
 ## Development
 
@@ -155,78 +237,40 @@ curl http://localhost:8080/ollama/api/generate \
 
 ### Prompt Injection Detection
 
-Run standardized benchmarks to measure detection accuracy and latency:
+Run benchmarks against public datasets:
 
 ```bash
-# Install benchmark dependencies
+# Install dependencies
 pip install -r benchmarks/requirements.txt
 
-# Test different services properly (with Docker restarts)
-python benchmarks/test_services.py
+# Run Gandalf benchmark (focused attacks)
+python benchmarks/prompt_injection.py --dataset gandalf
 
-# Run individual benchmarks (ensure service is configured correctly first)
-python benchmarks/prompt_injection_benchmark.py --dataset gandalf
-python benchmarks/prompt_injection_benchmark.py --dataset qualifire
-
-# Comprehensive benchmark suite (tests all services × thresholds)
-python benchmarks/comprehensive_benchmark.py
-
-# Official PINT benchmark (requires dataset access)
-python benchmarks/prompt_injection_pint.py --dataset pint-dataset.yaml
+# Run Qualifire benchmark (diverse attacks)
+python benchmarks/prompt_injection.py --dataset qualifire
 ```
 
-### Benchmark Results
+### Redis Cache Compatibility
 
-| Benchmark | Samples | Service | Threshold | Balanced Accuracy | Precision | Recall | Mean Latency | P95 Latency | Notes |
-|-----------|---------|---------|-----------|-------------------|-----------|--------|--------------|-------------|-------|
-| **Gandalf (English)** | 111 injections<br/>111 benign | Pattern | 0.70 | **73.9%** | **100.0%** | 47.7% | 14.6ms | 19.3ms | Advanced pattern matching<br/>Zero false positives |
-| **Qualifire Dataset** | 4,996 injections<br/>4,996 benign | Pattern | 0.70 | **54.8%** | **100.0%** | 9.6% | 15.6ms | 22.0ms | Large-scale dataset<br/>Zero false positives |
-| **ML Service** | Any dataset | ML | Any | **50.0%** | **100.0%** | **0.0%** | ~15ms | ~30ms | ❌ **NOT FUNCTIONAL**<br/>Uses fake embeddings |
+The ML embedding Redis cache format changed from CSV string to binary little‑endian float32, and the key length increased (8 → 16 bytes of hash). If you previously ran a version with CSV cache, clear the old keys to avoid mixed formats:
 
-### Service Comparison
+```bash
+# DANGER: deletes embeddings cache keys; adjust prefix if you changed it
+redis-cli --scan --pattern 'embedding:ml:*' | xargs -r redis-cli DEL
+```
 
-| Service | Description | Best Use Case | Current Status |
-|---------|-------------|---------------|----------------|
-| **Hash** | Fast deterministic hash + keywords | Simple, high-speed detection | ✅ Production ready |
-| **Pattern** | Advanced regex + contextual analysis | Balanced accuracy & performance | ✅ Production ready |
-| **ML** | ~~Transformer-like semantic understanding~~ | ~~Maximum accuracy~~ | ❌ **NOT IMPLEMENTED**<br/>Uses fake embeddings |
+**Recommended Configuration:**
 
-### Current Performance Analysis
-
-**✅ Pattern Service (Production Ready):**
-- **Gandalf**: 73.9% accuracy, 47.7% recall - Good for focused attacks
-- **Qualifire**: 54.8% accuracy, 9.6% recall - Struggles with sophisticated attacks
-- **Strengths**: Zero false positives, consistent performance, explainable
-- **Limitations**: Pattern-based detection misses creative variations
-
-**❌ ML Service (NOT FUNCTIONAL):**
-- **Critical Issue**: Uses fake/simulated embeddings, not real ML models
-- **Root Cause**: Code comment says "simulate ML model inference" - it's not actually using transformers
-- **Impact**: 0% recall because synthetic embeddings have no semantic meaning
-- **Status**: Placeholder implementation, needs complete rewrite with real ONNX/PyTorch integration
-
-**🎯 Recommended Configuration:**
 ```yaml
 security:
   vector_security:
-    service_type: "pattern"  # Use pattern service for production
-    block_threshold: 0.70    # Balanced threshold
-```
-
-**Threshold Tuning**:
-```yaml
-# configs/default.yaml
-security:
-  vector_security:
-    enabled: true
-    block_threshold: 0.70  # Current setting
-    # 0.60 = Higher recall, some false positives
-    # 0.80 = Lower recall, maximum precision
+    service_type: "pattern"
+    block_threshold: 0.70
 ```
 
 ## Project Structure
 
-```
+```text
 cmd/sentinel/     # Main app
 internal/
   config/         # YAML config loading
@@ -245,16 +289,18 @@ configs/          # YAML config files
 - Basic dashboard, not production monitoring
 - Limited to simple prompt injection patterns
 - No persistent storage of events
-- Docker setup includes PostgreSQL/Redis but they're not used yet
+- Docker setup includes PostgreSQL/Redis but they're not used in the runtime request path
 
 ## Roadmap (realistic)
 
 **Next up:**
+
 - Integrate actual ONNX model for better threat detection
 - Use the PostgreSQL/Redis setup for vector storage
 - Add more prompt injection patterns
 
 **Maybe later:**
+
 - Better dashboard with filtering
 - Export logs to files
 - More LLM provider support

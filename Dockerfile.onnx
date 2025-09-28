@@ -1,0 +1,74 @@
+# Multi-stage build for ONNX-enabled binary
+
+FROM golang:1.24-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata build-essential curl git && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download && \
+    go get github.com/yalue/onnxruntime_go@v1.21.0 && \
+    go mod download
+
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+
+# Build with CGO and ONNX tag
+ARG VERSION=0.1.0
+ARG COMMIT=dev
+ARG DATE
+ENV CGO_ENABLED=1
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -tags onnx -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -o /app/sentinel ./cmd/sentinel
+
+
+# Runtime image with ONNX Runtime shared library
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata curl libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install ONNX Runtime CPU shared library (auto-detect arch)
+ARG ORT_VERSION=1.22.0
+RUN set -eux; \
+    arch=$(dpkg --print-architecture); \
+    case "$arch" in \
+      amd64) ORT_PKG=onnxruntime-linux-x64-${ORT_VERSION}.tgz ;; \
+      arm64) ORT_PKG=onnxruntime-linux-aarch64-${ORT_VERSION}.tgz ;; \
+      *) echo "Unsupported architecture: $arch" && exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/${ORT_PKG} https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${ORT_PKG}; \
+    mkdir -p /opt/onnxruntime && tar -xzf /tmp/${ORT_PKG} -C /opt && \
+    ORT_DIR=$(find /opt -maxdepth 1 -type d -name "onnxruntime-*" | head -n1) && \
+    cp ${ORT_DIR}/lib/libonnxruntime.so /usr/local/lib/ && \
+    rm -rf /tmp/${ORT_PKG}
+
+# App files
+COPY --from=builder /app/sentinel /sentinel
+COPY configs/ /configs/
+COPY web/ /web/
+
+# Create directories
+RUN mkdir -p /logs /models && chmod 755 /models
+
+VOLUME ["/logs", "/models"]
+
+EXPOSE 8080
+
+ENV ONNXRUNTIME_SHARED_LIB=/usr/local/lib/libonnxruntime.so
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/sentinel", "--config", "/configs/docker.yaml", "--health-check"]
+
+USER nobody
+
+ENTRYPOINT ["/sentinel"]
+CMD ["--config", "/configs/docker.yaml"]
+
+

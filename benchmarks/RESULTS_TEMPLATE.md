@@ -7,7 +7,7 @@ Use this template to update benchmark results in README.md
 ```markdown
 | Benchmark | Samples | Threshold | Balanced Accuracy | Precision | Recall | Mean Latency | P95 Latency | Notes |
 |-----------|---------|-----------|-------------------|-----------|--------|--------------|-------------|-------|
-| **Gandalf (English)** | 111 injections<br/>111 benign | 0.70 | **73.9%** | **100.0%** | 47.7% | 14.6ms | 19.3ms | Zero false positives<br/>Production ready |
+| **Gandalf (English)** | 111 injections<br/>111 benign | 0.70 | **73.9%** | **100.0%** | 47.7% | 14.6ms | 19.3ms | Zero false positives<br/>Latency: blocked only |
 ```
 
 ## How to Update
@@ -17,8 +17,8 @@ Use this template to update benchmark results in README.md
    - Balanced Accuracy (PINT Score)
    - Precision (True Negatives / (True Negatives + False Positives))
    - Recall (True Positives / (True Positives + False Negatives))
-   - Mean Latency
-   - P95 Latency
+   - Mean Latency (blocked requests only)
+   - P95 Latency (blocked requests only)
 3. **Update table** in README.md
 4. **Add notes** about key characteristics
 
@@ -57,6 +57,6 @@ Test different thresholds and update table:
 ## Example Updates
 
 ```markdown
-| **Gandalf (0.60)** | 111 injections<br/>111 benign | 0.60 | **78.2%** | **95.5%** | 61.3% | 15.1ms | 20.8ms | Higher recall<br/>Some false positives |
-| **Gandalf (0.80)** | 111 injections<br/>111 benign | 0.80 | **71.1%** | **100.0%** | 42.3% | 14.2ms | 18.9ms | Maximum precision<br/>Lower recall |
+| **Gandalf (0.60)** | 111 injections<br/>111 benign | 0.60 | **78.2%** | **95.5%** | 61.3% | 15.1ms | 20.8ms | Higher recall<br/>Latency: blocked only |
+| **Gandalf (0.80)** | 111 injections<br/>111 benign | 0.80 | **71.1%** | **100.0%** | 42.3% | 14.2ms | 18.9ms | Maximum precision<br/>Latency: blocked only |
 ```

@@ -1,7 +1,9 @@
 package embeddings
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +29,7 @@ type MLEmbeddingService struct {
 	vectorStore *vector.Store
 	tokenizer   *Tokenizer
 	model       *TransformerModel
+	backend     TransformerBackend
 	mu          sync.RWMutex
 	startTime   time.Time
 	sem         chan struct{} // Semaphore to limit concurrent cache operations
@@ -45,6 +48,7 @@ type TransformerModel struct {
 	Loaded        bool
 	LoadTime      time.Time
 	ModelBytes    []byte // For future model file loading
+	bytesMu       sync.Mutex
 	ModelMetadata map[string]interface{}
 }
 
@@ -114,6 +118,14 @@ func NewMLEmbeddingService(config *ModelConfig, logger *zap.Logger, redisClient 
 	service.stats.ModelLoadTime = time.Since(start)
 	logger.Info("Model loading completed")
 
+	// Initialize backend if available (build-tagged implementation)
+	service.backend = NewTransformerBackend(logger, model.ModelPath, service.config.MaxLength)
+	if service.backend != nil && service.backend.IsReady() {
+		logger.Info("Transformer backend initialized")
+	} else {
+		logger.Info("No transformer backend available; using simulated embeddings")
+	}
+
 	logger.Info("ML embedding service initialized successfully",
 		zap.String("model_path", model.ModelPath),
 		zap.String("model_name", model.ModelName),
@@ -171,7 +183,15 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 
 		// Check vector database for similar attack patterns (fallback after cache miss)
 		var dbHit bool
-		if s.vectorStore != nil && analysis.IsAttack && analysis.Confidence > 0.7 {
+		hasStore := s.vectorStore != nil
+		if !(hasStore && analysis.IsAttack && analysis.Confidence > 0.7) {
+			s.logger.Info("Vector DB lookup skipped",
+				zap.Bool("has_store", hasStore),
+				zap.Bool("is_attack", analysis.IsAttack),
+				zap.Float32("analysis_confidence", analysis.Confidence),
+				zap.Float32("required_confidence", 0.7))
+		}
+		if hasStore && analysis.IsAttack && analysis.Confidence > 0.7 {
 			if dbEmbedding, err := s.searchVectorDatabase(ctx, text, analysis); err == nil && dbEmbedding != nil {
 				embedding = dbEmbedding
 				dbHit = true
@@ -179,15 +199,13 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 					zap.Float32("confidence", analysis.Confidence),
 					zap.String("attack_type", analysis.PrimaryAttackType))
 
-				// Cache in Redis for future use
+				// Cache in Redis for future use (non-blocking, respect caller context with short timeout)
 				if s.redisClient != nil {
-					var wg sync.WaitGroup
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						s.cacheEmbedding(context.Background(), text, embedding)
-					}()
-					wg.Wait()
+					go func(parentCtx context.Context, keyText string, emb []float32) {
+						cacheCtx, cancel := context.WithTimeout(parentCtx, 500*time.Millisecond)
+						defer cancel()
+						s.cacheEmbedding(cacheCtx, keyText, emb)
+					}(ctx, text, embedding)
 				}
 			}
 		}
@@ -202,15 +220,13 @@ func (s *MLEmbeddingService) GenerateEmbedding(ctx context.Context, text string)
 			}
 		}
 
-		// Cache in Redis if available
+		// Cache in Redis if available (non-blocking)
 		if s.redisClient != nil {
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				s.cacheEmbedding(context.Background(), text, embedding)
-			}()
-			wg.Wait()
+			go func(parentCtx context.Context, keyText string, emb []float32) {
+				cacheCtx, cancel := context.WithTimeout(parentCtx, 500*time.Millisecond)
+				defer cancel()
+				s.cacheEmbedding(cacheCtx, keyText, emb)
+			}(ctx, text, embedding)
 		}
 	}
 
@@ -320,12 +336,42 @@ func (s *MLEmbeddingService) GenerateBatchEmbeddings(ctx context.Context, texts 
 	}, nil
 }
 
+// runBatchInference is a placeholder for real batched model inference (ONNX/TensorRT/etc.)
+// It should accept a batch of tokenized inputs and run a single model call.
+// For now, it iterates and calls the single-sample path.
+func (s *MLEmbeddingService) runBatchInference(ctx context.Context, tokensBatch []*TokenizedInput) ([][]float32, error) {
+	// Prefer real backend if available
+	if s.backend != nil && s.backend.IsReady() {
+		return s.backend.EmbedBatch(ctx, tokensBatch)
+	}
+	// Fallback simulation
+	embeddings := make([][]float32, len(tokensBatch))
+	for i, t := range tokensBatch {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		emb, err := s.runTransformerInference(t)
+		if err != nil {
+			return nil, err
+		}
+		embeddings[i] = emb
+	}
+	return embeddings, nil
+}
+
 // processBatch processes a batch of texts for embedding generation
 func (s *MLEmbeddingService) processBatch(ctx context.Context, texts []string) ([][]float32, int, error) {
 	embeddings := make([][]float32, len(texts))
 	cacheHits := 0
 
 	for i, text := range texts {
+		select {
+		case <-ctx.Done():
+			return embeddings, cacheHits, ctx.Err()
+		default:
+		}
 		if strings.TrimSpace(text) == "" {
 			continue // Skip empty texts
 		}
@@ -352,15 +398,13 @@ func (s *MLEmbeddingService) processBatch(ctx context.Context, texts []string) (
 
 		embeddings[i] = embedding
 
-		// Cache asynchronously
+		// Cache asynchronously (non-blocking, short timeout)
 		if s.redisClient != nil {
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				s.cacheEmbedding(context.Background(), text, embedding)
-			}()
-			wg.Wait()
+			go func(parentCtx context.Context, keyText string, emb []float32) {
+				cacheCtx, cancel := context.WithTimeout(parentCtx, 500*time.Millisecond)
+				defer cancel()
+				s.cacheEmbedding(cacheCtx, keyText, emb)
+			}(ctx, text, embedding)
 		}
 	}
 
@@ -386,10 +430,20 @@ func (s *MLEmbeddingService) generateMLEmbedding(ctx context.Context, text strin
 		return nil, fmt.Errorf("%w: tokenization failed: %v", ErrTokenizationFailed, err)
 	}
 
-	// Replace with:
-	embedding, err := s.runTransformerInference(tokens)
-	if err != nil {
-		return nil, fmt.Errorf("transformer inference failed: %w", err)
+	var embedding []float32
+	if s.backend != nil && s.backend.IsReady() {
+		// Use real backend for single input via batch of size 1
+		res, err := s.backend.EmbedBatch(timeoutCtx, []*TokenizedInput{tokens})
+		if err != nil || len(res) != 1 {
+			return nil, fmt.Errorf("transformer backend failed: %w", err)
+		}
+		embedding = res[0]
+	} else {
+		// Fallback simulation
+		embedding, err = s.runTransformerInference(tokens)
+		if err != nil {
+			return nil, fmt.Errorf("transformer inference failed: %w", err)
+		}
 	}
 
 	// Verify output dimension
@@ -405,24 +459,25 @@ func (s *MLEmbeddingService) generateMLEmbedding(ctx context.Context, text strin
 func (s *MLEmbeddingService) getCachedEmbedding(ctx context.Context, text string) ([]float32, error) {
 	key := s.getCacheKey(text)
 
-	data, err := s.redisClient.Get(ctx, key).Result()
+	data, err := s.redisClient.Get(ctx, key).Bytes()
 	if err != nil {
 		return nil, err
 	}
 
-	// Parse the cached embedding (simple format: comma-separated floats)
-	parts := strings.Split(data, ",")
-	if len(parts) != EmbeddingDimensions {
-		return nil, fmt.Errorf("cached embedding has wrong dimensions: %d", len(parts))
+	// Decode binary little-endian float32 slice
+	if len(data)%4 != 0 {
+		return nil, fmt.Errorf("cached embedding has invalid byte length: %d", len(data))
+	}
+
+	count := len(data) / 4
+	if count != EmbeddingDimensions {
+		return nil, fmt.Errorf("cached embedding has wrong dimensions: %d", count)
 	}
 
 	embedding := make([]float32, EmbeddingDimensions)
-	for i, part := range parts {
-		var val float64
-		if _, err := fmt.Sscanf(part, "%f", &val); err != nil {
-			return nil, fmt.Errorf("failed to parse cached embedding: %w", err)
-		}
-		embedding[i] = float32(val)
+	buf := bytes.NewReader(data)
+	if err := binary.Read(buf, binary.LittleEndian, &embedding); err != nil {
+		return nil, fmt.Errorf("failed to decode cached embedding: %w", err)
 	}
 
 	return embedding, nil
@@ -434,26 +489,27 @@ func (s *MLEmbeddingService) cacheEmbedding(ctx context.Context, text string, em
 
 	key := s.getCacheKey(text)
 
-	// Convert embedding to string (simple format: comma-separated floats)
-	parts := make([]string, len(embedding))
-	for i, val := range embedding {
-		parts[i] = fmt.Sprintf("%.6f", val)
+	// Encode as binary little-endian float32 slice
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, embedding); err != nil {
+		s.logger.Error("Failed to encode embedding for cache", zap.Error(err))
+		return
 	}
-	data := strings.Join(parts, ",")
 
 	// Cache with configured TTL (default 6h)
 	ttl := 6 * time.Hour
 	if s.config.CacheTTL > 0 {
 		ttl = s.config.CacheTTL
 	}
-	if err := s.redisClient.Set(ctx, key, data, ttl).Err(); err != nil {
+	if err := s.redisClient.Set(ctx, key, buf.Bytes(), ttl).Err(); err != nil {
 		s.logger.Error("Failed to cache embedding", zap.Error(err))
 	}
 }
 
 func (s *MLEmbeddingService) getCacheKey(text string) string {
 	hash := s.shared.CreateDeterministicHash(text)
-	return fmt.Sprintf("embedding:ml:%x", hash[:8])
+	// Use 16 bytes (128-bit) to reduce collision risk
+	return fmt.Sprintf("embedding:ml:%x", hash[:16])
 }
 
 // Model loading and initialization
@@ -461,7 +517,23 @@ func (s *MLEmbeddingService) getCacheKey(text string) string {
 func (s *MLEmbeddingService) loadModel() (*TransformerModel, error) {
 	modelPath := s.config.ModelPath
 	if modelPath == "" {
-		modelPath = filepath.Join(s.config.CacheDir, "model.bin")
+		// Try to resolve a sensible default from cache dir, preferring ONNX files
+		candidates := []string{
+			filepath.Join(s.config.CacheDir, "model.onnx"),
+			filepath.Join(s.config.CacheDir, "all-MiniLM-L6-v2.onnx"),
+			filepath.Join(s.config.CacheDir, "minilm-l6-v2.onnx"),
+			filepath.Join(s.config.CacheDir, "model.bin"), // simulation fallback
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				modelPath = p
+				break
+			}
+		}
+		if modelPath == "" {
+			// Nothing found; default to simulation placeholder path
+			modelPath = filepath.Join(s.config.CacheDir, "model.bin")
+		}
 	}
 
 	// Check if model exists
@@ -644,6 +716,18 @@ func (s *MLEmbeddingService) GetStats() *ModelStats {
 	return &stats
 }
 
+// SetVectorStore attaches a vector store to enable database similarity lookups
+func (s *MLEmbeddingService) SetVectorStore(store *vector.Store) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.vectorStore = store
+	if store != nil {
+		s.logger.Info("Vector store attached to ML embedding service")
+	} else {
+		s.logger.Info("Vector store detached from ML embedding service")
+	}
+}
+
 // Close cleans up resources
 func (s *MLEmbeddingService) Close() error {
 	s.logger.Info("Closing ML embedding service")
@@ -786,35 +870,39 @@ func (s *MLEmbeddingService) searchVectorDatabase(ctx context.Context, text stri
 	searchDuration := time.Since(searchStart)
 
 	if err != nil {
-		s.logger.Debug("Vector database search failed",
+		s.logger.Info("Vector DB lookup result",
+			zap.Bool("used", false),
+			zap.Bool("hit", false),
 			zap.Error(err),
-			zap.Duration("search_duration", searchDuration))
+			zap.Int("results_count", 0),
+			zap.Float32("best_similarity", 0),
+			zap.Float32("min_similarity", searchOptions.MinSimilarity),
+			zap.String("attack_type", analysis.PrimaryAttackType),
+			zap.Duration("duration", searchDuration))
 		return nil, err
 	}
 
-	if len(results) == 0 {
-		s.logger.Debug("No similar attack patterns found in database",
-			zap.Duration("search_duration", searchDuration))
-		return nil, nil
+	resultsCount := len(results)
+	var bestSim float32
+	if resultsCount > 0 {
+		bestSim = results[0].Similarity
 	}
 
-	// Use the most similar pattern if confidence is high enough
-	bestMatch := results[0]
-	if bestMatch.Similarity >= 0.85 {
-		s.logger.Info("Found highly similar attack pattern in database",
-			zap.Float32("similarity", bestMatch.Similarity),
-			zap.String("attack_type", analysis.PrimaryAttackType),
-			zap.Duration("search_duration", searchDuration),
-			zap.String("matched_text_hash", bestMatch.Vector.TextHash))
+	// Decide whether to use the top match
+	used := resultsCount > 0 && bestSim >= 0.85
 
-		// Return the stored embedding
-		return bestMatch.Vector.Embedding, nil
+	s.logger.Info("Vector DB lookup result",
+		zap.Bool("used", used),
+		zap.Bool("hit", resultsCount > 0),
+		zap.Int("results_count", resultsCount),
+		zap.Float32("best_similarity", bestSim),
+		zap.Float32("min_similarity", searchOptions.MinSimilarity),
+		zap.String("attack_type", analysis.PrimaryAttackType),
+		zap.Duration("duration", searchDuration))
+
+	if used {
+		return results[0].Vector.Embedding, nil
 	}
-
-	s.logger.Debug("Similar patterns found but confidence too low",
-		zap.Float32("best_similarity", bestMatch.Similarity),
-		zap.Int("results_count", len(results)),
-		zap.Duration("search_duration", searchDuration))
 
 	return nil, nil
 }
@@ -877,13 +965,16 @@ func intPtr(i int) *int {
 func (s *MLEmbeddingService) runTransformerInference(tokens *TokenizedInput) ([]float32, error) {
 	// Placeholder for real inference (e.g., using ONNX runtime)
 	// Load model if not already (assuming s.model.ModelBytes is loaded)
+	s.model.bytesMu.Lock()
 	if len(s.model.ModelBytes) == 0 {
-		var err error
-		s.model.ModelBytes, err = os.ReadFile(s.model.ModelPath)
+		b, err := os.ReadFile(s.model.ModelPath)
 		if err != nil {
+			s.model.bytesMu.Unlock()
 			return nil, fmt.Errorf("failed to load model bytes: %w", err)
 		}
+		s.model.ModelBytes = b
 	}
+	s.model.bytesMu.Unlock()
 
 	// Simulate inference: mean pooling over token "embeddings" (using token IDs as proxy)
 	embedding := make([]float32, EmbeddingDimensions)

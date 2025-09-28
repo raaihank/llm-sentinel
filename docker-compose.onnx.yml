@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: llm-sentinel-postgres
+    environment:
+      POSTGRES_DB: llm_sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel_pass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d llm_sentinel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: llm-sentinel-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  llm-sentinel:
+    build:
+      context: .
+      dockerfile: Dockerfile.onnx
+      args:
+        VERSION: "0.1.0"
+        COMMIT: "dev"
+    container_name: llm-sentinel
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/logs
+      - ./models:/models
+      - ./configs/docker.yaml:/configs/docker.yaml:ro
+    environment:
+      TZ: UTC
+      SENTINEL_SECURITY_VECTOR_SECURITY_DATABASE_DATABASE_URL: postgres://sentinel:sentinel_pass@postgres:5432/llm_sentinel?sslmode=disable
+      SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_REDIS_URL: redis:6379
+      SENTINEL_SECURITY_VECTOR_SECURITY_ENABLED: "true"
+      SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_MODEL_CACHE_DIR: /models
+      SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_MODEL_AUTO_DOWNLOAD: "false"
+      SENTINEL_SECURITY_VECTOR_SECURITY_EMBEDDING_MODEL_MODEL_PATH: /models/model.onnx
+      ONNXRUNTIME_SHARED_LIB: /usr/local/lib/libonnxruntime.so
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "/sentinel", "--health-check", "--config", "/configs/docker.yaml"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+  redis_data:

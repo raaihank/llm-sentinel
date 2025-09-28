@@ -78,23 +78,48 @@ func NewSharedUtilities(logger *zap.Logger) (*SharedUtilities, error) {
 func (su *SharedUtilities) initializePatterns() error {
 	// High-confidence attack patterns
 	highRiskPatterns := map[string]float32{
-		`(?i)ignore\s+(all\s+)?(previous\s+|prior\s+)?instructions?`: 0.95,
-		`(?i)forget\s+(everything\s+)?(above|before)`:                0.90,
-		`(?i)(override|bypass|disable)\s+(system|security|safety)`:   0.95,
-		`(?i)jailbreak|dan\s+mode|evil\s+mode`:                       0.90,
-		`(?i)you\s+are\s+now\s+(a|an|the)?\s*(?:different|new|evil)`: 0.85,
-		`(?i)pretend\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:         0.85,
-		`(?i)act\s+as\s+if\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:   0.85,
+		// Core instruction manipulation (enhanced)
+		`(?i)ignore\s+(all\s+)?(previous\s+|prior\s+|earlier\s+)?instructions?`:          0.95,
+		`(?i)forget\s+(everything\s+)?(above|before|previously|that\s+was\s+instructed)`: 0.90,
+		`(?i)disregard\s+(all\s+)?(previous\s+|prior\s+|everything\s+)?.*`:               0.90,
+		`(?i)(override|bypass|disable|skip)\s+(system|security|safety|all\s+)?.*`:        0.95,
+
+		// Jailbreak attempts
+		`(?i)jailbreak|dan\s+mode|evil\s+mode|developer\s+mode`:                   0.90,
+		`(?i)you\s+are\s+now\s+(a|an|the)?\s*(?:different|new|evil|unrestricted)`: 0.85,
+		`(?i)pretend\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:                      0.85,
+		`(?i)act\s+as\s+if\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:                0.85,
+
+		// New instruction injection
+		`(?i)(these\s+are\s+)?(new|updated|different)\s+instructions?`: 0.85,
+		`(?i)from\s+now\s+on|starting\s+now|new\s+directive`:           0.80,
+
+		// Obfuscation detection
+		`(?i)translate\s+to\s+\w+:.*ignore`: 0.85,
+		`(?i)spell\s+backwards?:.*`:         0.75,
+		`(?i)\b\w+ssap\b|\bdrowssap\b`:      0.80, // password backwards variations
 	}
 
 	// Medium-confidence patterns
 	mediumRiskPatterns := map[string]float32{
-		`(?i)(tell|show|give)\s+me\s+(your|the)\s+(prompt|instructions?)`: 0.70,
-		`(?i)what\s+(is|are)\s+your\s+(initial|original|base)\s+`:         0.65,
-		`(?i)(developer|admin|god|root)\s+mode`:                           0.70,
-		`(?i)without\s+(any\s+)?(restrictions?|limitations?|rules?)`:      0.65,
-		`(?i)roleplay\s+as\s+(?:a\s+)?(?:different|evil|harmful)`:         0.70,
-		`(?i)imagine\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:              0.60,
+		// System probing
+		`(?i)(tell|show|give|provide)\s+me\s+(your|the)\s+(prompt|instructions?|system\s+message)`: 0.70,
+		`(?i)what\s+(is|are)\s+your\s+(initial|original|base|system)\s+`:                           0.65,
+		`(?i)reveal\s+(your|the)\s+(prompt|instructions?|guidelines)`:                              0.75,
+
+		// Mode switching
+		`(?i)(developer|admin|god|root|debug)\s+mode`:                            0.70,
+		`(?i)without\s+(any\s+)?(restrictions?|limitations?|rules?|guidelines?)`: 0.65,
+		`(?i)unrestricted\s+(mode|access|version)`:                               0.70,
+
+		// Roleplay manipulation
+		`(?i)roleplay\s+as\s+(?:a\s+)?(?:different|evil|harmful|unrestricted)`: 0.70,
+		`(?i)imagine\s+you\s+are\s+(?:not\s+)?(?:an?\s+)?ai`:                   0.60,
+		`(?i)pretend\s+(to\s+be|that\s+you\s+are)\s+(?:not\s+)?(?:an?\s+)?ai`:  0.65,
+
+		// Context manipulation
+		`(?i)in\s+the\s+context\s+of.*(?:ignore|bypass|override)`:                0.65,
+		`(?i)for\s+(?:this|the)\s+(?:exercise|task|scenario).*(?:ignore|forget)`: 0.65,
 	}
 
 	// Low-confidence but suspicious patterns
@@ -272,17 +297,140 @@ func (su *SharedUtilities) AnalyzeAttackPatterns(text string) AttackAnalysisResu
 		}
 	}
 
-	// Calculate final confidence
-	if matchCount > 0 {
-		// Use maximum confidence with boost for multiple matches
-		result.Confidence = maxConfidence
-		if matchCount > 1 {
-			result.Confidence = float32(math.Min(float64(result.Confidence*1.2), 1.0))
+	// Add fuzzy matching for common variations and typos
+	fuzzyMatches := su.detectFuzzyAttackPatterns(normalizedText)
+	for _, match := range fuzzyMatches {
+		result.MatchedPatterns = append(result.MatchedPatterns, "fuzzy:"+match.pattern)
+		result.Categories[match.category] += match.confidence * 0.8 // Slightly lower confidence for fuzzy
+		totalScore += match.confidence * 0.8
+		matchCount++
+
+		if match.confidence > maxConfidence {
+			maxConfidence = match.confidence
+			result.PrimaryAttackType = match.category
 		}
-		result.IsAttack = result.Confidence > 0.5
+	}
+
+	// Calculate final confidence using enhanced scoring
+	if matchCount > 0 {
+		// Base confidence from highest-scoring pattern
+		result.Confidence = maxConfidence
+
+		// Apply progressive boost for multiple matches
+		if matchCount > 1 {
+			// More aggressive boost: 1.3x for 2 matches, 1.5x for 3+
+			multiplier := float32(1.0 + 0.3*math.Min(float64(matchCount-1), 2.0))
+			result.Confidence = float32(math.Min(float64(result.Confidence*multiplier), 1.0))
+		}
+
+		// Apply category diversity bonus
+		categoryCount := len(result.Categories)
+		if categoryCount > 1 {
+			// Bonus for attacks spanning multiple categories (more sophisticated)
+			diversityBonus := float32(0.1 * math.Min(float64(categoryCount-1), 2.0))
+			result.Confidence = float32(math.Min(float64(result.Confidence+diversityBonus), 1.0))
+		}
+
+		// Dynamic threshold based on pattern strength
+		threshold := float32(0.6) // Raised from 0.5
+		if maxConfidence >= 0.9 {
+			threshold = 0.5 // Lower threshold for very high-confidence patterns
+		}
+
+		result.IsAttack = result.Confidence >= threshold
 	}
 
 	return result
+}
+
+// FuzzyMatch represents a fuzzy pattern match
+type FuzzyMatch struct {
+	pattern    string
+	category   string
+	confidence float32
+}
+
+// detectFuzzyAttackPatterns detects common attack pattern variations and typos
+func (su *SharedUtilities) detectFuzzyAttackPatterns(text string) []FuzzyMatch {
+	var matches []FuzzyMatch
+
+	// Common instruction manipulation variations
+	instructionVariations := []string{
+		"ignore", "ignor", "ingore", "igore", // typos
+		"forget", "forgt", "foget",
+		"disregard", "disreguard", "disregrd",
+		"override", "overide", "overrid",
+		"bypass", "byass", "bypas",
+	}
+
+	contextVariations := []string{
+		"instructions", "instruction", "instrucions", "instructons",
+		"previous", "previus", "prevous", "prior",
+		"everything", "evrything", "everythng",
+	}
+
+	// Check for fuzzy instruction manipulation
+	for _, instVar := range instructionVariations {
+		for _, ctxVar := range contextVariations {
+			// Look for patterns like "ignor all previus instructons"
+			fuzzyPattern := fmt.Sprintf(`\b%s\s+(?:all\s+)?%s\b`, instVar, ctxVar)
+			if matched, _ := regexp.MatchString(fuzzyPattern, text); matched {
+				matches = append(matches, FuzzyMatch{
+					pattern:    fmt.Sprintf("%s %s", instVar, ctxVar),
+					category:   "high_risk",
+					confidence: 0.85,
+				})
+			}
+		}
+	}
+
+	// Check for word order variations
+	if strings.Contains(text, "all") && strings.Contains(text, "ignore") && strings.Contains(text, "instruction") {
+		// Matches "all ignore instructions", "instruction ignore all", etc.
+		matches = append(matches, FuzzyMatch{
+			pattern:    "word_order_variation",
+			category:   "high_risk",
+			confidence: 0.80,
+		})
+	}
+
+	// Check for obfuscation patterns
+	if strings.Contains(text, "translate") && (strings.Contains(text, "ignore") || strings.Contains(text, "forget")) {
+		matches = append(matches, FuzzyMatch{
+			pattern:    "translation_obfuscation",
+			category:   "high_risk",
+			confidence: 0.85,
+		})
+	}
+
+	// Check for backwards/reversed words (common obfuscation)
+	words := strings.Fields(text)
+	for _, word := range words {
+		if len(word) > 4 {
+			reversed := reverseString(word)
+			suspiciousWords := []string{"password", "secret", "prompt", "instruction", "system"}
+			for _, suspicious := range suspiciousWords {
+				if strings.Contains(reversed, suspicious) {
+					matches = append(matches, FuzzyMatch{
+						pattern:    "reversed_word:" + word,
+						category:   "medium_risk",
+						confidence: 0.70,
+					})
+				}
+			}
+		}
+	}
+
+	return matches
+}
+
+// reverseString reverses a string
+func reverseString(s string) string {
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
 }
 
 // GenerateTextFeatures extracts numerical features from text

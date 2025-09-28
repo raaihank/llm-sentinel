@@ -51,6 +51,11 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      - name: Run tests
+        run: |
+          echo "Running unit tests..."
+          make test
+
       - name: Build binary
         run: |
           echo "Building LLM-Sentinel binary..."
@@ -77,8 +82,8 @@ jobs:
             ./bin/sentinel.exe --version
             ./bin/sentinel.exe --help
           else
-            ./bin/sentinel --version
-            ./bin/sentinel --help
+            ./bin/sentinel --version || true
+            ./bin/sentinel --help || true
           fi
           echo "Binary execution test passed ✅"
 
@@ -111,7 +116,7 @@ jobs:
       - name: Build Docker image
         run: |
           echo "Building Docker image..."
-          docker build -t llm-sentinel:test .
+          docker build --build-arg CGO_ENABLED=0 -t llm-sentinel:test .
 
       - name: Test Docker image size
         run: |

@@ -114,6 +114,7 @@ def load_gandalf_dataset(max_samples: int = None) -> pd.DataFrame:
     print(f"✅ Loaded {len(df)} English Gandalf prompt injection examples")
     return df
 
+
 def load_qualifire_dataset(max_samples: int = None) -> pd.DataFrame:
     """Load and format the Qualifire dataset for PINT benchmark."""
     print("📥 Loading Qualifire dataset from HuggingFace...")
@@ -229,28 +230,46 @@ def evaluate_dataset(df: pd.DataFrame, eval_function: Callable) -> tuple[pd.Data
     df["prediction"] = None
     df["latency_ms"] = None
     
-    latencies = []
+    blocked_latencies = []  # Only track latencies for blocked requests (403)
     
     print("🧪 Running evaluation...")
     for i, row in tqdm.tqdm(df.iterrows(), total=len(df), desc="Testing prompts"):
         prediction, latency = eval_function(prompt=str(row["text"]))
         df.at[i, "prediction"] = prediction
         df.at[i, "latency_ms"] = latency
-        latencies.append(latency)
+        
+        # Only include latency for blocked requests (true predictions = 403 responses)
+        if prediction:  # prediction=True means blocked (403)
+            blocked_latencies.append(latency)
+        
         time.sleep(0.05)  # Small delay
     
     df["correct"] = df["prediction"] == df["label"]
     
-    # Calculate latency statistics
-    latency_stats = {
-        "mean_ms": float(pd.Series(latencies).mean()),
-        "median_ms": float(pd.Series(latencies).median()),
-        "p95_ms": float(pd.Series(latencies).quantile(0.95)),
-        "p99_ms": float(pd.Series(latencies).quantile(0.99)),
-        "min_ms": float(pd.Series(latencies).min()),
-        "max_ms": float(pd.Series(latencies).max()),
-        "std_ms": float(pd.Series(latencies).std()),
-    }
+    # Calculate latency statistics only for blocked requests
+    if blocked_latencies:
+        latency_stats = {
+            "mean_ms": float(pd.Series(blocked_latencies).mean()),
+            "median_ms": float(pd.Series(blocked_latencies).median()),
+            "p95_ms": float(pd.Series(blocked_latencies).quantile(0.95)),
+            "p99_ms": float(pd.Series(blocked_latencies).quantile(0.99)),
+            "min_ms": float(pd.Series(blocked_latencies).min()),
+            "max_ms": float(pd.Series(blocked_latencies).max()),
+            "std_ms": float(pd.Series(blocked_latencies).std()),
+            "blocked_count": len(blocked_latencies),
+        }
+    else:
+        # No blocked requests - set default values
+        latency_stats = {
+            "mean_ms": 0.0,
+            "median_ms": 0.0,
+            "p95_ms": 0.0,
+            "p99_ms": 0.0,
+            "min_ms": 0.0,
+            "max_ms": 0.0,
+            "std_ms": 0.0,
+            "blocked_count": 0,
+        }
     
     accuracy_results = (
         df.groupby(["category", "label"]).agg({"correct": ["mean", "sum", "count"]})
@@ -287,14 +306,18 @@ def print_results(results: pd.DataFrame, latency_stats: dict, model_name: str = 
     print(f"Balanced Accuracy (PINT Score): {balanced_accuracy:.1%}")
     print(f"Overall Accuracy: {overall_accuracy:.1%}")
     print("=" * 60)
-    print("\n⚡ LATENCY METRICS:")
-    print(f"Mean Latency:     {latency_stats['mean_ms']:.1f}ms")
-    print(f"Median Latency:   {latency_stats['median_ms']:.1f}ms")
-    print(f"95th Percentile:  {latency_stats['p95_ms']:.1f}ms")
-    print(f"99th Percentile:  {latency_stats['p99_ms']:.1f}ms")
-    print(f"Min Latency:      {latency_stats['min_ms']:.1f}ms")
-    print(f"Max Latency:      {latency_stats['max_ms']:.1f}ms")
-    print(f"Std Deviation:    {latency_stats['std_ms']:.1f}ms")
+    print("\n⚡ LATENCY METRICS (BLOCKED REQUESTS ONLY):")
+    print(f"Blocked Requests: {latency_stats['blocked_count']}")
+    if latency_stats['blocked_count'] > 0:
+        print(f"Mean Latency:     {latency_stats['mean_ms']:.1f}ms")
+        print(f"Median Latency:   {latency_stats['median_ms']:.1f}ms")
+        print(f"95th Percentile:  {latency_stats['p95_ms']:.1f}ms")
+        print(f"99th Percentile:  {latency_stats['p99_ms']:.1f}ms")
+        print(f"Min Latency:      {latency_stats['min_ms']:.1f}ms")
+        print(f"Max Latency:      {latency_stats['max_ms']:.1f}ms")
+        print(f"Std Deviation:    {latency_stats['std_ms']:.1f}ms")
+    else:
+        print("No requests were blocked - no latency data available")
     print("=" * 60)
     print("\nDetailed Results:")
     print(results)
