@@ -1,6 +1,6 @@
 # Multi-stage build for ONNX-enabled binary
 
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates tzdata build-essential curl git && \
