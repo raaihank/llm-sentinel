@@ -90,6 +90,9 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, target *ur
 						for _, value := range values {
 							req.Header.Add(key, value)
 						}
+						logger.Debug("Restored auth header for upstream",
+							zap.String("header", key),
+							zap.String("provider", provider))
 					}
 				}
 			}

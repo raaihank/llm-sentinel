@@ -18,6 +18,8 @@ const (
 	EventTypeSystemStatus EventType = "system_status"
 	// EventTypeConnection represents connection events
 	EventTypeConnection EventType = "connection"
+	// EventTypeRequestCompletion represents request completion for response time tracking
+	EventTypeRequestCompletion EventType = "request_completion"
 )
 
 // Event represents a WebSocket event sent to clients
@@ -76,6 +78,16 @@ type ConnectionEvent struct {
 	ClientIP  string `json:"client_ip"`
 	UserAgent string `json:"user_agent,omitempty"`
 	Message   string `json:"message,omitempty"`
+}
+
+// RequestCompletionEvent represents request completion for response time tracking
+type RequestCompletionEvent struct {
+	RequestID    string  `json:"request_id"`
+	Method       string  `json:"method"`
+	Path         string  `json:"path"`
+	StatusCode   int     `json:"status_code"`
+	ResponseTime float64 `json:"response_time"` // in milliseconds
+	ResponseSize int     `json:"response_size"` // in bytes
 }
 
 // ClientMessage represents messages sent from clients to server

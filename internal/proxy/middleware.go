@@ -52,8 +52,21 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			zap.Int("response_size", rw.size),
 		)
 
-		// Note: Only security issues (PII detections, vector threats) are broadcast via WebSocket
-		// General request logs are only written to structured logs
+		// Broadcast request completion event to WebSocket for response time tracking
+		completionEvent := websocket.Event{
+			Type:      websocket.EventTypeRequestCompletion,
+			Timestamp: time.Now(),
+			RequestID: requestID,
+			Data: websocket.RequestCompletionEvent{
+				RequestID:    requestID,
+				Method:       r.Method,
+				Path:         r.URL.Path,
+				StatusCode:   rw.statusCode,
+				ResponseTime: float64(duration.Nanoseconds()) / 1e6, // Convert to milliseconds
+				ResponseSize: rw.size,
+			},
+		}
+		s.wsHub.BroadcastEvent(completionEvent)
 	})
 }
 
@@ -86,17 +99,18 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 		}
 		r.Body.Close()
 
-		// Process headers for sensitive data (for logging purposes)
+		// Process headers for sensitive data (for logging purposes only)
+		// Don't modify the actual request headers - they'll be handled in the proxy
 		processedHeaders := s.detector.ProcessHeaders(r.Header)
-		for key, values := range processedHeaders {
-			r.Header.Del(key)
-			for _, value := range values {
-				r.Header.Add(key, value)
-			}
-		}
+
+		// Store processed headers for logging but keep original headers on request
+		ctx = context.WithValue(ctx, "processed_headers", processedHeaders)
+		r = r.WithContext(ctx)
 
 		// Process body for PII
+		piiStart := time.Now()
 		result := s.detector.ProcessText(string(body))
+		piiDuration := time.Since(piiStart)
 
 		// Log findings
 		if len(result.Findings) > 0 {
@@ -119,7 +133,7 @@ func (s *Server) privacyMiddleware(next http.Handler) http.Handler {
 					Findings:      result.Findings,
 					TotalFindings: len(result.Findings),
 					MaskedContent: true,
-					ProcessingMS:  float64(time.Since(time.Now()).Nanoseconds()) / 1e6,
+					ProcessingMS:  float64(piiDuration.Nanoseconds()) / 1e6,
 				},
 			}
 			s.wsHub.BroadcastEvent(piiEvent)

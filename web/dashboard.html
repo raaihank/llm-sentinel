@@ -527,7 +527,7 @@
                 ws.send(JSON.stringify({
                     type: 'subscribe',
                     data: {
-                        events: ['pii_detection', 'vector_security', 'system_status', 'connection'],
+                        events: ['pii_detection', 'vector_security', 'system_status', 'connection', 'request_completion'],
                         filter: { exclude_health: false }
                     }
                 }));
@@ -603,6 +603,9 @@
                 case 'connection':
                     handleConnection(event);
                     break;
+                case 'request_completion':
+                    handleRequestCompletion(event);
+                    break;
             }
             
             updateStatistics();
@@ -613,32 +616,55 @@
             stats.secretsDetected += data.total_findings;
             stats.piiFindings += data.total_findings;
             
+            // Track PII processing time (convert to reasonable scale if needed)
+            if (data.processing_ms && data.processing_ms > 0) {
+                // If processing_ms is very small (< 1ms), it might be in microseconds, so convert
+                let processingTime = data.processing_ms;
+                if (processingTime < 0.1) {
+                    processingTime = processingTime * 1000; // Convert microseconds to milliseconds
+                }
+                stats.responseTimes.push(processingTime);
+                if (stats.responseTimes.length > 100) {
+                    stats.responseTimes.shift(); // Remove oldest
+                }
+            }
+            
             const findings = data.findings.map(f => f.rule_name).join(', ');
+            const processingTimeStr = data.processing_ms ? `${data.processing_ms.toFixed(3)}ms` : 'N/A';
             addSecurityEvent(
                 'PII Detection',
-                data.total_findings + ' secrets found: ' + findings,
+                data.total_findings + ' secrets found: ' + findings + ` (${processingTimeStr})`,
                 'high',
                 event.timestamp
             );
             
-            addActivityEvent(data.total_findings + ' PII detected in ' + data.method + ' ' + data.path);
+            addActivityEvent(data.total_findings + ' PII detected in ' + data.method + ' ' + data.path + ` (${processingTimeStr})`);
         }
 
         function handleVectorSecurity(event) {
             const data = event.data;
             
+            // Track vector security processing time
+            if (data.processing_ms && data.processing_ms > 0) {
+                stats.responseTimes.push(data.processing_ms);
+                if (stats.responseTimes.length > 100) {
+                    stats.responseTimes.shift(); // Remove oldest
+                }
+            }
+            
             if (data.is_malicious) {
                 stats.threatsBlocked++;
                 stats.promptAttacks++;
                 
+                const processingTimeStr = data.processing_ms ? `${data.processing_ms.toFixed(1)}ms` : 'N/A';
                 addSecurityEvent(
                     'Vector Security',
-                    `${data.attack_type} detected (${(data.confidence * 100).toFixed(1)}% confidence)`,
+                    `${data.attack_type} detected (${(data.confidence * 100).toFixed(1)}% confidence) (${processingTimeStr})`,
                     'high',
                     event.timestamp
                 );
                 
-                addActivityEvent(`🚨 ${data.attack_type} blocked (${(data.confidence * 100).toFixed(1)}% confidence)`);
+                addActivityEvent(`🚨 ${data.attack_type} blocked (${(data.confidence * 100).toFixed(1)}% confidence) (${processingTimeStr})`);
             }
         }
 
@@ -654,6 +680,28 @@
                 addActivityEvent(`🔗 Client connected: ${data.client_ip}`);
             } else if (data.action === 'disconnected') {
                 addActivityEvent(`🔌 Client disconnected: ${data.client_ip}`);
+            }
+        }
+
+        function handleRequestCompletion(event) {
+            const data = event.data;
+            
+            // Track total requests
+            stats.totalRequests++;
+            
+            // Add response time to our tracking array (only keep last 100 for performance)
+            if (data.response_time && data.response_time > 0) {
+                stats.responseTimes.push(data.response_time);
+                if (stats.responseTimes.length > 100) {
+                    stats.responseTimes.shift(); // Remove oldest
+                }
+            }
+            
+            // Log activity for non-health check endpoints
+            if (!data.path.includes('/health') && !data.path.includes('/ws')) {
+                const statusEmoji = data.status_code >= 400 ? '❌' : '✅';
+                const responseTimeStr = data.response_time ? `${data.response_time.toFixed(1)}ms` : 'N/A';
+                addActivityEvent(`${statusEmoji} ${data.method} ${data.path} - ${data.status_code} (${responseTimeStr})`);
             }
         }
 

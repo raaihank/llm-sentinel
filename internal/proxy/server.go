@@ -107,10 +107,11 @@ func New(cfg *config.Config, log *logger.Logger) (*Server, error) {
 
 	// Create WebSocket hub with configuration
 	hubConfig := &websocket.HubConfig{
-		BroadcastPIIDetections:  cfg.WebSocket.Events.BroadcastPIIDetections,
-		BroadcastVectorSecurity: cfg.WebSocket.Events.BroadcastVectorSecurity,
-		BroadcastSystem:         cfg.WebSocket.Events.BroadcastSystem,
-		BroadcastConnections:    cfg.WebSocket.Events.BroadcastConnections,
+		BroadcastPIIDetections:     cfg.WebSocket.Events.BroadcastPIIDetections,
+		BroadcastVectorSecurity:    cfg.WebSocket.Events.BroadcastVectorSecurity,
+		BroadcastSystem:            cfg.WebSocket.Events.BroadcastSystem,
+		BroadcastConnections:       cfg.WebSocket.Events.BroadcastConnections,
+		BroadcastRequestCompletion: true, // Enable response time tracking
 	}
 	wsHub := websocket.NewHub(hubConfig, log.WithComponent("websocket").Logger)
 
