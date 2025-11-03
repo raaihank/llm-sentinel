@@ -199,7 +199,7 @@ jobs:
           echo "✅ go.mod and go.sum are tidy"
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.txt
