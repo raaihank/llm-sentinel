@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o sentinel ./cmd/sentinel
 
 # Production stage - use alpine instead of scratch for better file system support
-FROM alpine:3.19
+FROM alpine:3.22
 
 # Install ca-certificates (user 65534 already exists as 'nobody')
 RUN apk --no-cache add ca-certificates tzdata
